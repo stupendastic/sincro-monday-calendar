@@ -32,3 +32,6 @@ COLUMN_MAP = {
     "lookup_mkte8baj": "ContactoComercial",
     "lookup_mkte7deh": "TelefonoComercial"
 }
+
+# Mapeo inverso para encontrar el ID a partir del nombre legible
+COLUMN_MAP_REVERSE = {v: k for k, v in COLUMN_MAP.items()}
