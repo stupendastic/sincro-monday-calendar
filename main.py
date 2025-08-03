@@ -2,7 +2,7 @@ import os
 import requests
 import json
 from dotenv import load_dotenv
-from google_calendar_service import get_calendar_service, create_google_event
+from google_calendar_service import get_calendar_service, create_google_event, update_google_event
 
 # Importamos nuestros módulos locales
 import config  # Importa nuestro nuevo archivo de configuración
@@ -146,7 +146,50 @@ def parse_monday_item(item):
         else: # Para el resto de columnas, usamos el campo 'text'
             parsed_item[col_name.lower()] = col_data.get('text', '')
 
+    # Extraer el ID del evento de Google si existe
+    google_event_col = column_values_by_id.get(config.COL_GOOGLE_EVENT_ID)
+    if google_event_col:
+        parsed_item['google_event_id'] = google_event_col.get('text', '').strip()
+    else:
+        parsed_item['google_event_id'] = None
+
     return parsed_item
+
+def update_monday_column(item_id, board_id, column_id, value):
+    """Actualiza una columna de texto en Monday.com con un valor específico."""
+    
+    mutation = """
+    mutation ($boardId: Int!, $itemId: Int!, $columnId: String!, $value: String!) {
+        change_simple_column_value(board_id: $boardId, item_id: $itemId, column_id: $columnId, value: $value) {
+            id
+        }
+    }
+    """
+    
+    variables = {
+        "boardId": board_id,
+        "itemId": int(item_id),
+        "columnId": column_id,
+        "value": value
+    }
+    
+    data = {'query': mutation, 'variables': variables}
+    
+    try:
+        response = requests.post(url=MONDAY_API_URL, json=data, headers=HEADERS)
+        response.raise_for_status()
+        result = response.json()
+        
+        if 'errors' in result:
+            print(f"Error al actualizar columna en Monday: {result['errors']}")
+            return False
+        
+        print(f"✅ ID de evento guardado en Monday: {value}")
+        return True
+        
+    except Exception as e:
+        print(f"Error al actualizar columna en Monday: {e}")
+        return False
 
 def main():
     """Función principal de la aplicación."""
@@ -211,14 +254,38 @@ def main():
                     filmmaker_profile = profile
                     break
         
-        # 4. Si encontramos un perfil, creamos el evento
+        # 4. Si encontramos un perfil, procesamos el evento con lógica de upsert
         if filmmaker_profile:
             calendar_id = filmmaker_profile['calendar_id']
+            google_event_id = item_procesado.get('google_event_id')
+            
             print(f"Procesando '{item_procesado['name']}' para {filmmaker_profile['monday_name']}...")
             
-            # Crear el evento en el calendario correcto
-            create_google_event(google_service, calendar_id, item_procesado)
-            items_sincronizados += 1  # Incrementar contador de sincronizados
+            # LÓGICA DE UPSERT
+            if google_event_id:
+                # Si ya existe un ID de evento, actualizamos
+                print(f"🔄 Actualizando evento existente: {google_event_id}")
+                update_google_event(google_service, calendar_id, item_procesado)
+                items_sincronizados += 1
+            else:
+                # Si no existe ID, creamos nuevo evento
+                print(f"➕ Creando nuevo evento...")
+                new_event_id = create_google_event(google_service, calendar_id, item_procesado)
+                
+                if new_event_id:
+                    # Guardamos el ID del nuevo evento en Monday
+                    print(f"💾 Guardando ID de evento en Monday: {new_event_id}")
+                    update_monday_column(
+                        item_procesado['id'], 
+                        config.BOARD_ID_GRABACIONES, 
+                        config.COL_GOOGLE_EVENT_ID, 
+                        new_event_id
+                    )
+                    items_sincronizados += 1
+                else:
+                    print(f"❌ Error al crear evento para '{item_procesado['name']}'")
+                    items_saltados += 1
+            
             print("-" * 20)
         else:
             print(f"-> Saltando '{item_procesado['name']}': Operario '{operario_nombre}' no encontrado en la configuración.")
