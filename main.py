@@ -36,7 +36,10 @@ def get_monday_board_items(board_id, column_ids):
                     items {{
                         id
                         name
-                        updates(limit: 1) {{
+                        group {{
+                            title
+                        }}
+                        updates {{
                             body
                         }}
                         column_values(ids: ["{ids_string}"]) {{
@@ -99,6 +102,7 @@ def parse_monday_item(item):
     parsed_item = {
         'id': item.get('id'),
         'name': item.get('name'),
+        'group_title': item.get('group', {}).get('title', 'N/A'),
         'update_body': item.get('updates', [{}])[0].get('body', '') if item.get('updates') else ''
     }
 
@@ -187,6 +191,22 @@ def parse_monday_item(item):
         fichas_comercial.append(f"- {contacto} (Tel: {telefono})")
     
     parsed_item['contacto_comercial_formateado'] = '\n'.join(fichas_comercial) if fichas_comercial else 'No disponible'
+
+    # Procesar todos los updates
+    updates = item.get('updates', [])
+    if updates:
+        update_bodies = []
+        for update in updates:
+            body = update.get('body', '').strip()
+            if body:
+                update_bodies.append(body)
+        
+        if update_bodies:
+            parsed_item['all_updates_html'] = '<hr>'.join(update_bodies)
+        else:
+            parsed_item['all_updates_html'] = 'Sin updates.'
+    else:
+        parsed_item['all_updates_html'] = 'Sin updates.'
 
     # Extraer el ID del evento de Google si existe
     google_event_col = column_values_by_id.get(config.COL_GOOGLE_EVENT_ID)

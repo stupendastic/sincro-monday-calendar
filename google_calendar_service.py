@@ -54,21 +54,28 @@ def create_google_event(service, calendar_id, item_data):
     """
     Crea un nuevo evento en un calendario de Google a partir de datos procesados de Monday.
     """
+    # Lógica del Link de Dropbox
+    dropbox_link = item_data.get('linkdropbox', '')
+    if dropbox_link:
+        dropbox_link_html = f'<a href="{dropbox_link}">Abrir Enlace</a>'
+    else:
+        dropbox_link_html = '<i>Sin link a Dropbox Dron</i>'
+    
     # Construimos la descripción del evento usando HTML para que se vea bien
-    description = f"""
+    description = f"""<b>Grupo:</b> {item_data.get('group_title', 'N/A')}
 <b>📋 Estado Permisos:</b> {item_data.get('estadopermisos', 'N/A')}
 <b>🛠️ Acciones a Realizar:</b> {item_data.get('accionesrealizar', 'N/A')}
-<br>
+
 <b>--- 📞 Contactos de Obra ---</b>
 {item_data.get('contacto_obra_formateado', 'No disponible')}
-<br>
+
 <b>--- 👤 Contactos Comerciales ---</b>
 {item_data.get('contacto_comercial_formateado', 'No disponible')}
-<br>
+
 <b>--- 🔗 Enlaces y Novedades ---</b>
-<b>Dropbox:</b> <a href="{item_data.get('linkdropbox', '#')}">Abrir Enlace</a>
-<b>Última Novedad en Monday:</b>
-<i>{item_data.get('update_body', 'Sin novedades.')}</i>
+<b>Link Dropbox Dron:</b> {dropbox_link_html}
+<b>Updates en el elemento en Monday:</b>
+{item_data.get('all_updates_html', '<i>Sin updates.</i>')}
     """
 
     # Determinar si es evento de día completo o con hora específica
@@ -119,21 +126,28 @@ def update_google_event(service, calendar_id, item_data):
     """
     Actualiza un evento existente en Google Calendar a partir de datos procesados de Monday.
     """
+    # Lógica del Link de Dropbox
+    dropbox_link = item_data.get('linkdropbox', '')
+    if dropbox_link:
+        dropbox_link_html = f'<a href="{dropbox_link}">Abrir Enlace</a>'
+    else:
+        dropbox_link_html = '<i>Sin link a Dropbox Dron</i>'
+    
     # Construimos la descripción del evento usando HTML para que se vea bien
-    description = f"""
+    description = f"""<b>Grupo:</b> {item_data.get('group_title', 'N/A')}
 <b>📋 Estado Permisos:</b> {item_data.get('estadopermisos', 'N/A')}
 <b>🛠️ Acciones a Realizar:</b> {item_data.get('accionesrealizar', 'N/A')}
-<br>
+
 <b>--- 📞 Contactos de Obra ---</b>
 {item_data.get('contacto_obra_formateado', 'No disponible')}
-<br>
+
 <b>--- 👤 Contactos Comerciales ---</b>
 {item_data.get('contacto_comercial_formateado', 'No disponible')}
-<br>
+
 <b>--- 🔗 Enlaces y Novedades ---</b>
-<b>Dropbox:</b> <a href="{item_data.get('linkdropbox', '#')}">Abrir Enlace</a>
-<b>Última Novedad en Monday:</b>
-<i>{item_data.get('update_body', 'Sin novedades.')}</i>
+<b>Link Dropbox Dron:</b> {dropbox_link_html}
+<b>Updates en el elemento en Monday:</b>
+{item_data.get('all_updates_html', '<i>Sin updates.</i>')}
     """
 
     # Determinar si es evento de día completo o con hora específica
