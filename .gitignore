@@ -53,4 +53,12 @@ coverage/
 
 # Temporary folders
 tmp/
-temp/ 
+temp/
+
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python 
