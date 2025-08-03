@@ -11,6 +11,11 @@ yarn-error.log*
 .env.test.local
 .env.production.local
 
+# Credentials and sensitive files
+credentials.json
+*.key
+*.pem
+
 # Build outputs
 dist/
 build/
