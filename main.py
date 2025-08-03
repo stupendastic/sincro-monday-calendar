@@ -17,11 +17,11 @@ HEADERS = {"Authorization": MONDAY_API_KEY}
 # --- Fin de la Configuración ---
 
 def get_monday_board_items(board_id, column_ids):
-    """Obtiene todos los elementos de un tablero con sus columnas específicas."""
+    """Obtiene todos los elementos de un tablero, usando fragmentos en línea para columnas reflejo."""
     
-    # Convierte la lista de IDs de columnas a un string para la consulta
     ids_string = '", "'.join(column_ids)
 
+    # ESTA ES LA QUERY MEJORADA
     query = f"""
     query {{
         boards(ids: {board_id}) {{
@@ -36,6 +36,10 @@ def get_monday_board_items(board_id, column_ids):
                         id
                         text
                         value
+                        type  # Pedimos el tipo para saber cómo tratarlo
+                        ... on MirrorValue {{
+                            display_value # ¡La clave para las columnas reflejo!
+                        }}
                     }}
                 }}
             }}
@@ -52,53 +56,55 @@ def get_monday_board_items(board_id, column_ids):
         print(f"Error al obtener los elementos de Monday: {e}")
         return None
 
+
 def parse_monday_item(item):
     """
     Toma un 'item' de la respuesta de Monday y lo convierte en un diccionario limpio.
+    Ahora entiende las columnas de tipo 'mirror' (reflejo).
     """
-    # Manejo seguro de updates
-    updates = item.get('updates', [])
-    update_body = updates[0].get('body', '') if updates else ''
-    
     parsed_item = {
         'id': item.get('id'),
         'name': item.get('name'),
-        'update_body': update_body
+        'update_body': item.get('updates', [{}])[0].get('body', '') if item.get('updates') else ''
     }
 
     # Creamos un diccionario para acceder fácilmente a los valores por su ID
-    column_values = {cv['id']: cv for cv in item['column_values']}
+    column_values_by_id = {cv['id']: cv for cv in item['column_values']}
 
-    # --- Extraemos cada valor de forma segura ---
-    # Si una columna no existe o está vacía, se asignará 'None' o un valor por defecto.
-
-    # Operario (Columna de Persona)
-    operario_val = column_values.get(config.COLUMN_MAP_REVERSE['Operario'])
-    if operario_val and operario_val.get('value'):
-        # El valor es un JSON, lo cargamos
-        value_data = json.loads(operario_val['value'])
-        # Nos quedamos con el email de la primera persona asignada
-        if value_data.get('personsAndTeams'):
-            parsed_item['operario_email'] = value_data['personsAndTeams'][0].get('email')
-        else:
-            parsed_item['operario_email'] = None
-    else:
-        parsed_item['operario_email'] = None
-
-    # Fecha de Grabación (Columna de Fecha)
-    fecha_val = column_values.get(config.COLUMN_MAP_REVERSE['FechaGrab'])
-    if fecha_val and fecha_val.get('value'):
-        value_data = json.loads(fecha_val['value'])
-        parsed_item['fecha_inicio'] = f"{value_data.get('date')}T{value_data.get('time', '09:00:00')}"
-        parsed_item['fecha_fin'] = f"{value_data.get('date')}T{value_data.get('time', '18:00:00')}" # Asumimos un horario, lo mejoraremos luego
-    else:
-        parsed_item['fecha_inicio'] = None
-        parsed_item['fecha_fin'] = None
+    # Recorremos nuestro mapa de columnas de config.py
+    for col_name, col_id in config.COLUMN_MAP_REVERSE.items():
+        col_data = column_values_by_id.get(col_id)
         
-    # El resto de columnas son de texto simple
-    for key_legible, col_id in config.COLUMN_MAP_REVERSE.items():
-        if key_legible not in parsed_item: # Evitamos sobreescribir los ya procesados
-             parsed_item[key_legible.lower()] = column_values.get(col_id, {}).get('text', '')
+        if not col_data:
+            parsed_item[col_name.lower()] = None
+            continue
+
+        # --- Lógica de Procesamiento por Tipo ---
+        col_type = col_data.get('type')
+
+        if col_type == 'mirror':
+            # ¡BINGO! Si es una columna reflejo, usamos display_value.
+            parsed_item[col_name.lower()] = col_data.get('display_value')
+        
+        elif col_name == 'Operario': # Columna de Persona
+            value_data = json.loads(col_data['value']) if col_data.get('value') else {}
+            persons = value_data.get('personsAndTeams', [])
+            # Monday.com no proporciona email en los datos de persona
+            parsed_item['operario_email'] = None  # No disponible en Monday.com
+            parsed_item['operario'] = col_data.get('text') # El nombre visible ya viene en 'text'
+
+        elif col_name == 'FechaGrab': # Columna de Fecha
+            if col_data.get('value'):
+                value_data = json.loads(col_data['value'])
+                # Asumimos un horario por defecto, luego lo podemos hacer más inteligente
+                parsed_item['fecha_inicio'] = f"{value_data.get('date')}T09:00:00"
+                parsed_item['fecha_fin'] = f"{value_data.get('date')}T18:00:00"
+            else:
+                parsed_item['fecha_inicio'] = None
+                parsed_item['fecha_fin'] = None
+
+        else: # Para el resto de columnas, usamos el campo 'text'
+            parsed_item[col_name.lower()] = col_data.get('text', '')
 
     return parsed_item
 
