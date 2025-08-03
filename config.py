@@ -16,7 +16,10 @@ COLUMN_IDS = [
     "lookup_mktetkek",     # Teléfono Obra
     "lookup_mkte8baj",     # Contacto Comercial
     "lookup_mkte7deh",     # Teléfono Comercial
-    "text_mktfdhm3"        # ID Evento Google (Sincro)
+    "text_mktfdhm3",       # ID Evento Google (Sincro)
+    "text_mktefg5"         # Cliente
+
+    
 ]
 
 # Diccionario para mapear ID de columna a un nombre legible (opcional pero útil)
@@ -32,7 +35,8 @@ COLUMN_MAP = {
     "lookup_mktetkek": "TelefonoObra",
     "lookup_mkte8baj": "ContactoComercial",
     "lookup_mkte7deh": "TelefonoComercial",
-    "text_mktfdhm3": "GoogleEventId"
+    "text_mktfdhm3": "GoogleEventId",
+    "text_mktefg5": "Cliente"
 }
 
 # Mapeo inverso para encontrar el ID a partir del nombre legible
@@ -40,6 +44,9 @@ COLUMN_MAP_REVERSE = {v: k for k, v in COLUMN_MAP.items()}
 
 # ID de la columna para guardar el ID del evento de Google
 COL_GOOGLE_EVENT_ID = "text_mktfdhm3"
+
+# ID de la columna para el cliente
+COL_CLIENTE = "text_mktefg5"
 
 
 # Perfiles de Filmmakers - Configuración unificada

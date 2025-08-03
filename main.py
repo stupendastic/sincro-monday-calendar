@@ -156,6 +156,21 @@ def parse_monday_item(item):
                 parsed_item['fecha_inicio'] = None
                 parsed_item['fecha_fin'] = None
 
+        elif col_name == 'Cliente': # Columna de Cliente
+            parsed_item['cliente'] = col_data.get('text', '')
+            
+        elif col_name == 'LinkDropbox': # Columna de Link
+            # Leer el campo 'value' que contiene un objeto JSON
+            if col_data.get('value'):
+                try:
+                    value_data = json.loads(col_data['value'])
+                    # Extraer la URL del objeto JSON
+                    parsed_item['linkdropbox'] = value_data.get('url', '')
+                except (json.JSONDecodeError, KeyError):
+                    parsed_item['linkdropbox'] = ''
+            else:
+                parsed_item['linkdropbox'] = ''
+                
         else: # Para el resto de columnas, usamos el campo 'text'
             parsed_item[col_name.lower()] = col_data.get('text', '')
 
