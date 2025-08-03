@@ -37,7 +37,14 @@ COLUMN_MAP = {
 COLUMN_MAP_REVERSE = {v: k for k, v in COLUMN_MAP.items()}
 
 
-# Mapeo de email de operario de Monday al ID del Calendario de Google
-FILMMAKER_CALENDARS = {
-    "seonrtn@gmail.com": "c_e6ca98cff5247dc9f08abfb6019aabc062bed12883a5cb80470e89261cad5d9c@group.calendar.google.com"
-}
+# Perfiles de Filmmakers - Configuración unificada
+FILMMAKER_PROFILES = [
+    {
+        "monday_name": "Arnau Admin",           # Nombre visible en Monday.com
+        "monday_email": "admin@stupendastic.com",  # Email en Monday.com
+        "personal_email": "seonrtn@gmail.com",  # Email personal para notificaciones
+        "calendar_id": "c_e6ca98cff5247dc9f08abfb6019aabc062bed12883a5cb80470e89261cad5d9c@group.calendar.google.com"  # ID del calendario de Google
+    }
+    
+    # Añade más perfiles aquí siguiendo el mismo formato...
+]

@@ -18,44 +18,77 @@ HEADERS = {"Authorization": MONDAY_API_KEY}
 # --- Fin de la Configuración ---
 
 def get_monday_board_items(board_id, column_ids):
-    """Obtiene todos los elementos de un tablero, usando fragmentos en línea para columnas reflejo."""
+    """Obtiene todos los elementos de un tablero usando paginación."""
+    
+    # 1. Inicializar variables
+    all_items = []
+    cursor = None
     
     ids_string = '", "'.join(column_ids)
 
-    # ESTA ES LA QUERY MEJORADA
-    query = f"""
-    query {{
-        boards(ids: {board_id}) {{
-            items_page (limit: 100) {{
-                items {{
-                    id
-                    name
-                    updates(limit: 1) {{
-                        body
-                    }}
-                    column_values(ids: ["{ids_string}"]) {{
+    # 2. Bucle infinito para paginación
+    while True:
+        # 3. Query modificada para aceptar cursor
+        query = f"""
+        query($cursor: String) {{
+            boards(ids: {board_id}) {{
+                items_page(limit: 100, cursor: $cursor) {{
+                    items {{
                         id
-                        text
-                        value
-                        type  # Pedimos el tipo para saber cómo tratarlo
-                        ... on MirrorValue {{
-                            display_value # ¡La clave para las columnas reflejo!
+                        name
+                        updates(limit: 1) {{
+                            body
+                        }}
+                        column_values(ids: ["{ids_string}"]) {{
+                            id
+                            text
+                            value
+                            type  # Pedimos el tipo para saber cómo tratarlo
+                            ... on MirrorValue {{
+                                display_value # ¡La clave para las columnas reflejo!
+                            }}
                         }}
                     }}
+                    cursor
                 }}
             }}
         }}
-    }}
-    """
-    data = {'query': query}
+        """
+        
+        # Variables para la petición
+        variables = {}
+        if cursor:
+            variables['cursor'] = cursor
+            
+        data = {'query': query, 'variables': variables}
+        
+        try:
+            # 4a. Hacer llamada a la API
+            response = requests.post(url=MONDAY_API_URL, json=data, headers=HEADERS)
+            response.raise_for_status()
+            response_data = response.json()
+            
+            # 4b. Añadir items de esta página a la lista
+            items_page = response_data.get('data', {}).get('boards', [{}])[0].get('items_page', {})
+            current_items = items_page.get('items', [])
+            all_items.extend(current_items)
+            
+            # 4c. Extraer el nuevo cursor
+            new_cursor = items_page.get('cursor')
+            
+            # 4d. Condición de salida
+            if not new_cursor:
+                break
+                
+            # 4e. Actualizar cursor para la siguiente iteración
+            cursor = new_cursor
+            
+        except Exception as e:
+            print(f"Error al obtener los elementos de Monday: {e}")
+            return None
     
-    try:
-        response = requests.post(url=MONDAY_API_URL, json=data, headers=HEADERS)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        print(f"Error al obtener los elementos de Monday: {e}")
-        return None
+    # 5. Devolver la lista completa
+    return {'data': {'boards': [{'items_page': {'items': all_items}}]}}
 
 
 def parse_monday_item(item):
@@ -88,11 +121,17 @@ def parse_monday_item(item):
             parsed_item[col_name.lower()] = col_data.get('display_value')
         
         elif col_name == 'Operario': # Columna de Persona
-            value_data = json.loads(col_data['value']) if col_data.get('value') else {}
-            persons = value_data.get('personsAndTeams', [])
-            # Monday.com no proporciona email en los datos de persona
-            parsed_item['operario_email'] = None  # No disponible en Monday.com
-            parsed_item['operario'] = col_data.get('text') # El nombre visible ya viene en 'text'
+            # El nombre visible del operario ya lo tenemos en el campo 'text'
+            parsed_item['operario'] = col_data.get('text')
+            
+            # Ahora, extraemos el email del campo 'value'
+            if col_data.get('value'):
+                value_data = json.loads(col_data['value'])
+                persons = value_data.get('personsAndTeams', [])
+                # Nos quedamos con el email de la PRIMERA persona asignada (si existe)
+                parsed_item['operario_email'] = persons[0].get('email') if persons else None
+            else:
+                parsed_item['operario_email'] = None
 
         elif col_name == 'FechaGrab': # Columna de Fecha
             if col_data.get('value'):
@@ -112,6 +151,11 @@ def parse_monday_item(item):
 def main():
     """Función principal de la aplicación."""
     print("Iniciando Sincronizador Stupendastic...")
+    
+    # 1. Inicializar contadores
+    items_procesados = 0
+    items_sincronizados = 0
+    items_saltados = 0
     
     google_service = get_calendar_service()
     if not google_service or not MONDAY_API_KEY:
@@ -133,24 +177,61 @@ def main():
 
     for item in items:
         item_procesado = parse_monday_item(item)
+        items_procesados += 1  # Incrementar contador de procesados
         
-        # --- Lógica de Sincronización ---
-        # 1. Comprobar si el item es apto para sincronizar
-        operarios = item_procesado.get('operario', '').split(', ')
-        if not operarios or not item_procesado.get('fecha_inicio'):
-            print(f"Saltando item '{item_procesado['name']}' (sin operario o sin fecha).")
+        # --- LÓGICA DE SINCRONIZACIÓN REFACTORIZADA ---
+        
+        # 1. Obtenemos datos del operario desde Monday
+        operario_email = item_procesado.get('operario_email')
+        operario_nombre = item_procesado.get('operario')
+        
+        # 2. Comprobamos si el item es apto (tiene fecha y un operario)
+        if not operario_nombre or not item_procesado.get('fecha_inicio'):
+            if not operario_nombre:
+                print(f"-> Saltando '{item_procesado['name']}': No tiene operario asignado.")
+            else:
+                print(f"-> Saltando '{item_procesado['name']}': No tiene fecha asignada.")
+            items_saltados += 1
             continue
 
-        # 2. Encontrar el calendario correcto para cada operario
-        for operario_email in config.FILMMAKER_CALENDARS.keys():
-            if any(name_part in operario_email for name_part in operarios if name_part):
-                calendar_id = config.FILMMAKER_CALENDARS[operario_email]
-                print(f"Procesando '{item_procesado['name']}' para {operario_email}...")
-                
-                # 3. Crear el evento en Google Calendar
-                # (Añadiremos lógica para ACTUALIZAR en el futuro, por ahora solo crea)
-                create_google_event(google_service, calendar_id, item_procesado)
-                print("-" * 20)
+        # 3. Buscamos el perfil del filmmaker usando estrategia de dos pasos
+        filmmaker_profile = None
+        
+        # PASO 1: Match por Email (para miembros completos)
+        if operario_email:
+            for profile in config.FILMMAKER_PROFILES:
+                if profile['monday_email'] == operario_email:
+                    filmmaker_profile = profile
+                    break
+        
+        # PASO 2: Match por Nombre (para invitados o si no se encontró por email)
+        if not filmmaker_profile:
+            for profile in config.FILMMAKER_PROFILES:
+                if profile['monday_name'] == operario_nombre:
+                    filmmaker_profile = profile
+                    break
+        
+        # 4. Si encontramos un perfil, creamos el evento
+        if filmmaker_profile:
+            calendar_id = filmmaker_profile['calendar_id']
+            print(f"Procesando '{item_procesado['name']}' para {filmmaker_profile['monday_name']}...")
+            
+            # Crear el evento en el calendario correcto
+            create_google_event(google_service, calendar_id, item_procesado)
+            items_sincronizados += 1  # Incrementar contador de sincronizados
+            print("-" * 20)
+        else:
+            print(f"-> Saltando '{item_procesado['name']}': Operario '{operario_nombre}' no encontrado en la configuración.")
+            items_saltados += 1
+
+    # Resumen detallado
+    print("\n" + "=" * 50)
+    print("📊 RESUMEN DE SINCRONIZACIÓN")
+    print("=" * 50)
+    print(f"📋 Elementos procesados: {items_procesados}")
+    print(f"✅ Eventos sincronizados: {items_sincronizados}")
+    print(f"⏭️  Elementos saltados: {items_saltados}")
+    print("=" * 50)
 
     print("\nProceso de sincronización terminado.")
 
