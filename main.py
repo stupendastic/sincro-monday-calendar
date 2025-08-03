@@ -136,15 +136,57 @@ def parse_monday_item(item):
         elif col_name == 'FechaGrab': # Columna de Fecha
             if col_data.get('value'):
                 value_data = json.loads(col_data['value'])
-                # Asumimos un horario por defecto, luego lo podemos hacer más inteligente
-                parsed_item['fecha_inicio'] = f"{value_data.get('date')}T09:00:00"
-                parsed_item['fecha_fin'] = f"{value_data.get('date')}T18:00:00"
+                date_value = value_data.get('date')
+                time_value = value_data.get('time')
+                
+                if time_value:
+                    # Si hay hora, usamos formato datetime
+                    parsed_item['fecha_inicio'] = f"{date_value}T{time_value}"
+                    # Para la fecha fin, asumimos 9 horas de duración
+                    parsed_item['fecha_fin'] = f"{date_value}T{time_value}"  # TODO: calcular hora fin
+                else:
+                    # Si no hay hora, es evento de día completo
+                    parsed_item['fecha_inicio'] = date_value
+                    parsed_item['fecha_fin'] = date_value
             else:
                 parsed_item['fecha_inicio'] = None
                 parsed_item['fecha_fin'] = None
 
         else: # Para el resto de columnas, usamos el campo 'text'
             parsed_item[col_name.lower()] = col_data.get('text', '')
+
+    # Procesar contactos para crear fichas formateadas
+    # Contactos de Obra
+    contactos_obra = parsed_item.get('contactoobra', '').split(',') if parsed_item.get('contactoobra') else []
+    telefonos_obra = parsed_item.get('telefonoobra', '').split(',') if parsed_item.get('telefonoobra') else []
+    
+    # Limpiar y emparejar contactos de obra
+    contactos_obra = [c.strip() for c in contactos_obra if c.strip()]
+    telefonos_obra = [t.strip() for t in telefonos_obra if t.strip()]
+    
+    # Crear fichas de contacto de obra
+    fichas_obra = []
+    for i, contacto in enumerate(contactos_obra):
+        telefono = telefonos_obra[i] if i < len(telefonos_obra) else 'Sin teléfono'
+        fichas_obra.append(f"- {contacto} (Tel: {telefono})")
+    
+    parsed_item['contacto_obra_formateado'] = '\n'.join(fichas_obra) if fichas_obra else 'No disponible'
+    
+    # Contactos Comerciales
+    contactos_comercial = parsed_item.get('contactocomercial', '').split(',') if parsed_item.get('contactocomercial') else []
+    telefonos_comercial = parsed_item.get('telefonocomercial', '').split(',') if parsed_item.get('telefonocomercial') else []
+    
+    # Limpiar y emparejar contactos comerciales
+    contactos_comercial = [c.strip() for c in contactos_comercial if c.strip()]
+    telefonos_comercial = [t.strip() for t in telefonos_comercial if t.strip()]
+    
+    # Crear fichas de contacto comercial
+    fichas_comercial = []
+    for i, contacto in enumerate(contactos_comercial):
+        telefono = telefonos_comercial[i] if i < len(telefonos_comercial) else 'Sin teléfono'
+        fichas_comercial.append(f"- {contacto} (Tel: {telefono})")
+    
+    parsed_item['contacto_comercial_formateado'] = '\n'.join(fichas_comercial) if fichas_comercial else 'No disponible'
 
     # Extraer el ID del evento de Google si existe
     google_event_col = column_values_by_id.get(config.COL_GOOGLE_EVENT_ID)

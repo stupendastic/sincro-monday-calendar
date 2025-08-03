@@ -56,34 +56,55 @@ def create_google_event(service, calendar_id, item_data):
     """
     # Construimos la descripción del evento usando HTML para que se vea bien
     description = f"""
-<b>Estado Permisos:</b> {item_data.get('estadopermisos', 'N/A')}
-<b>Acciones a Realizar:</b> {item_data.get('accionesrealizar', 'N/A')}
+<b>📋 Estado Permisos:</b> {item_data.get('estadopermisos', 'N/A')}
+<b>🛠️ Acciones a Realizar:</b> {item_data.get('accionesrealizar', 'N/A')}
 <br>
-<b>--- Contactos ---</b>
-<b>Obra:</b> {item_data.get('contactoobra', 'N/A')} ({item_data.get('telefonoobra', 'N/A')})
-<b>Comercial:</b> {item_data.get('contactocomercial', 'N/A')} ({item_data.get('telefonocomercial', 'N/A')})
+<b>--- 📞 Contactos de Obra ---</b>
+{item_data.get('contacto_obra_formateado', 'No disponible')}
 <br>
-<b>--- Enlaces y Novedades ---</b>
-<b>Dropbox:</b> {item_data.get('linkdropbox', 'N/A')}
+<b>--- 👤 Contactos Comerciales ---</b>
+{item_data.get('contacto_comercial_formateado', 'No disponible')}
+<br>
+<b>--- 🔗 Enlaces y Novedades ---</b>
+<b>Dropbox:</b> <a href="{item_data.get('linkdropbox', '#')}">Abrir Enlace</a>
 <b>Última Novedad en Monday:</b>
 <i>{item_data.get('update_body', 'Sin novedades.')}</i>
     """
 
-    # Construimos el cuerpo del evento para la API de Google
-    event = {
-        'summary': item_data['name'],
-        'location': item_data.get('ubicacion', ''),
-        'description': description,
-        'start': {
-            'dateTime': item_data['fecha_inicio'],
-            'timeZone': 'Europe/Madrid',
-        },
-        'end': {
-            'dateTime': item_data['fecha_fin'],
-            'timeZone': 'Europe/Madrid',
-        },
-        # Aquí añadiremos más cosas en el futuro, como recordatorios.
-    }
+    # Determinar si es evento de día completo o con hora específica
+    fecha_inicio = item_data['fecha_inicio']
+    fecha_fin = item_data['fecha_fin']
+    
+    if 'T' in fecha_inicio:
+        # Evento con hora específica
+        event = {
+            'summary': item_data['name'],
+            'location': item_data.get('ubicacion', ''),
+            'description': description,
+            'guestsCanModify': False,
+            'start': {
+                'dateTime': fecha_inicio,
+                'timeZone': 'Europe/Madrid',
+            },
+            'end': {
+                'dateTime': fecha_fin,
+                'timeZone': 'Europe/Madrid',
+            },
+        }
+    else:
+        # Evento de día completo
+        event = {
+            'summary': item_data['name'],
+            'location': item_data.get('ubicacion', ''),
+            'description': description,
+            'guestsCanModify': False,
+            'start': {
+                'date': fecha_inicio,
+            },
+            'end': {
+                'date': fecha_fin,
+            },
+        }
 
     try:
         print(f"  -> Creando evento en Google Calendar: '{item_data['name']}'")
@@ -100,34 +121,55 @@ def update_google_event(service, calendar_id, item_data):
     """
     # Construimos la descripción del evento usando HTML para que se vea bien
     description = f"""
-<b>Estado Permisos:</b> {item_data.get('estadopermisos', 'N/A')}
-<b>Acciones a Realizar:</b> {item_data.get('accionesrealizar', 'N/A')}
+<b>📋 Estado Permisos:</b> {item_data.get('estadopermisos', 'N/A')}
+<b>🛠️ Acciones a Realizar:</b> {item_data.get('accionesrealizar', 'N/A')}
 <br>
-<b>--- Contactos ---</b>
-<b>Obra:</b> {item_data.get('contactoobra', 'N/A')} ({item_data.get('telefonoobra', 'N/A')})
-<b>Comercial:</b> {item_data.get('contactocomercial', 'N/A')} ({item_data.get('telefonocomercial', 'N/A')})
+<b>--- 📞 Contactos de Obra ---</b>
+{item_data.get('contacto_obra_formateado', 'No disponible')}
 <br>
-<b>--- Enlaces y Novedades ---</b>
-<b>Dropbox:</b> {item_data.get('linkdropbox', 'N/A')}
+<b>--- 👤 Contactos Comerciales ---</b>
+{item_data.get('contacto_comercial_formateado', 'No disponible')}
+<br>
+<b>--- 🔗 Enlaces y Novedades ---</b>
+<b>Dropbox:</b> <a href="{item_data.get('linkdropbox', '#')}">Abrir Enlace</a>
 <b>Última Novedad en Monday:</b>
 <i>{item_data.get('update_body', 'Sin novedades.')}</i>
     """
 
-    # Construimos el cuerpo del evento para la API de Google
-    event = {
-        'summary': item_data['name'],
-        'location': item_data.get('ubicacion', ''),
-        'description': description,
-        'start': {
-            'dateTime': item_data['fecha_inicio'],
-            'timeZone': 'Europe/Madrid',
-        },
-        'end': {
-            'dateTime': item_data['fecha_fin'],
-            'timeZone': 'Europe/Madrid',
-        },
-        # Aquí añadiremos más cosas en el futuro, como recordatorios.
-    }
+    # Determinar si es evento de día completo o con hora específica
+    fecha_inicio = item_data['fecha_inicio']
+    fecha_fin = item_data['fecha_fin']
+    
+    if 'T' in fecha_inicio:
+        # Evento con hora específica
+        event = {
+            'summary': item_data['name'],
+            'location': item_data.get('ubicacion', ''),
+            'description': description,
+            'guestsCanModify': False,
+            'start': {
+                'dateTime': fecha_inicio,
+                'timeZone': 'Europe/Madrid',
+            },
+            'end': {
+                'dateTime': fecha_fin,
+                'timeZone': 'Europe/Madrid',
+            },
+        }
+    else:
+        # Evento de día completo
+        event = {
+            'summary': item_data['name'],
+            'location': item_data.get('ubicacion', ''),
+            'description': description,
+            'guestsCanModify': False,
+            'start': {
+                'date': fecha_inicio,
+            },
+            'end': {
+                'date': fecha_fin,
+            },
+        }
 
     try:
         event_id = item_data['google_event_id']
