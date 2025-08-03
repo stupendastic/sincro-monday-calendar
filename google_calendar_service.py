@@ -49,3 +49,47 @@ def get_calendar_service():
     except HttpError as error:
         print(f"Ocurrió un error al construir el servicio de Google: {error}")
         return None
+
+def create_google_event(service, calendar_id, item_data):
+    """
+    Crea un nuevo evento en un calendario de Google a partir de datos procesados de Monday.
+    """
+    # Construimos la descripción del evento usando HTML para que se vea bien
+    description = f"""
+<b>Estado Permisos:</b> {item_data.get('estadopermisos', 'N/A')}
+<b>Acciones a Realizar:</b> {item_data.get('accionesrealizar', 'N/A')}
+<br>
+<b>--- Contactos ---</b>
+<b>Obra:</b> {item_data.get('contactoobra', 'N/A')} ({item_data.get('telefonoobra', 'N/A')})
+<b>Comercial:</b> {item_data.get('contactocomercial', 'N/A')} ({item_data.get('telefonocomercial', 'N/A')})
+<br>
+<b>--- Enlaces y Novedades ---</b>
+<b>Dropbox:</b> {item_data.get('linkdropbox', 'N/A')}
+<b>Última Novedad en Monday:</b>
+<i>{item_data.get('update_body', 'Sin novedades.')}</i>
+    """
+
+    # Construimos el cuerpo del evento para la API de Google
+    event = {
+        'summary': item_data['name'],
+        'location': item_data.get('ubicacion', ''),
+        'description': description,
+        'start': {
+            'dateTime': item_data['fecha_inicio'],
+            'timeZone': 'Europe/Madrid',
+        },
+        'end': {
+            'dateTime': item_data['fecha_fin'],
+            'timeZone': 'Europe/Madrid',
+        },
+        # Aquí añadiremos más cosas en el futuro, como recordatorios.
+    }
+
+    try:
+        print(f"  -> Creando evento en Google Calendar: '{item_data['name']}'")
+        created_event = service.events().insert(calendarId=calendar_id, body=event).execute()
+        print(f"  ✅ ¡Evento creado! ID: {created_event.get('id')}")
+        return created_event.get('id')
+    except HttpError as error:
+        print(f"  ❌ Error al crear evento en Google Calendar: {error}")
+        return None

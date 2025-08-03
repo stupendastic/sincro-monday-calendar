@@ -2,6 +2,7 @@ import os
 import requests
 import json
 from dotenv import load_dotenv
+from google_calendar_service import get_calendar_service, create_google_event
 
 # Importamos nuestros módulos locales
 import config  # Importa nuestro nuevo archivo de configuración
@@ -112,39 +113,46 @@ def main():
     """Función principal de la aplicación."""
     print("Iniciando Sincronizador Stupendastic...")
     
-    # Inicializar servicios
     google_service = get_calendar_service()
     if not google_service or not MONDAY_API_KEY:
         print("Error en la inicialización de servicios. Abortando.")
         return
 
-    print("✅ Servicios de Google y Monday inicializados.")
+    print("✅ Servicios inicializados.")
 
-    # Obtener los datos del tablero de Grabaciones
-    print(f"Obteniendo datos del tablero de Monday con ID: {config.BOARD_ID_GRABACIONES}...")
+    print(f"Obteniendo datos del tablero: {config.BOARD_ID_GRABACIONES}...")
     monday_response = get_monday_board_items(config.BOARD_ID_GRABACIONES, config.COLUMN_IDS)
 
     if not monday_response or 'errors' in monday_response:
         print("Error al obtener datos de Monday:", monday_response.get('errors'))
         return
 
-    # Extraemos la lista de items de la respuesta
     items = monday_response.get('data', {}).get('boards', [{}])[0].get('items_page', {}).get('items', [])
-    
-    if not items:
-        print("No se encontraron elementos en el tablero.")
-        return
-
-    print(f"Se encontraron {len(items)} elemento(s). Procesando...")
+    print(f"Se encontraron {len(items)} elemento(s). Sincronizando...")
     print("-" * 40)
 
-    # Recorremos cada item, lo procesamos y lo imprimimos
     for item in items:
         item_procesado = parse_monday_item(item)
-        print(json.dumps(item_procesado, indent=2))
-        print("-" * 20)
+        
+        # --- Lógica de Sincronización ---
+        # 1. Comprobar si el item es apto para sincronizar
+        operarios = item_procesado.get('operario', '').split(', ')
+        if not operarios or not item_procesado.get('fecha_inicio'):
+            print(f"Saltando item '{item_procesado['name']}' (sin operario o sin fecha).")
+            continue
 
-    print("\nProceso terminado.")
+        # 2. Encontrar el calendario correcto para cada operario
+        for operario_email in config.FILMMAKER_CALENDARS.keys():
+            if any(name_part in operario_email for name_part in operarios if name_part):
+                calendar_id = config.FILMMAKER_CALENDARS[operario_email]
+                print(f"Procesando '{item_procesado['name']}' para {operario_email}...")
+                
+                # 3. Crear el evento en Google Calendar
+                # (Añadiremos lógica para ACTUALIZAR en el futuro, por ahora solo crea)
+                create_google_event(google_service, calendar_id, item_procesado)
+                print("-" * 20)
+
+    print("\nProceso de sincronización terminado.")
 
 if __name__ == "__main__":
     main()

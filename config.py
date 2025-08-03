@@ -35,3 +35,9 @@ COLUMN_MAP = {
 
 # Mapeo inverso para encontrar el ID a partir del nombre legible
 COLUMN_MAP_REVERSE = {v: k for k, v in COLUMN_MAP.items()}
+
+
+# Mapeo de email de operario de Monday al ID del Calendario de Google
+FILMMAKER_CALENDARS = {
+    "seonrtn@gmail.com": "c_e6ca98cff5247dc9f08abfb6019aabc062bed12883a5cb80470e89261cad5d9c@group.calendar.google.com"
+}
