@@ -1,46 +1,40 @@
 import os
 import requests
 from dotenv import load_dotenv
-import json # Para imprimir la respuesta de forma legible
+
+# Importamos nuestra nueva función desde el otro archivo
+from google_calendar_service import get_calendar_service
 
 # Carga las variables del archivo .env (tu clave de API de Monday)
 load_dotenv()
 
-# --- Configuración ---
-API_KEY = os.getenv("MONDAY_API_KEY")
-API_URL = "https://api.monday.com/v2"
-HEADERS = {"Authorization": API_KEY}
+# --- Configuración de Monday ---
+MONDAY_API_KEY = os.getenv("MONDAY_API_KEY")
+MONDAY_API_URL = "https://api.monday.com/v2"
+HEADERS = {"Authorization": MONDAY_API_KEY}
 # --- Fin de la Configuración ---
 
-def probar_conexion_monday():
-    """
-    Función para hacer una consulta simple a Monday y verificar la conexión.
-    Esta consulta pide la lista de todos los tableros en tu cuenta.
-    """
-    # Esta es la "pregunta" que le hacemos a Monday en su idioma (GraphQL)
-    query = '{ boards { id, name } }'
-    data = {'query': query}
 
-    print("Intentando conectar con Monday.com...")
+def main():
+    """Función principal de la aplicación."""
+    print("Iniciando Sincronizador Stupendastic...")
     
-    try:
-        # Hacemos la llamada a la API
-        response = requests.post(url=API_URL, json=data, headers=HEADERS)
-        response.raise_for_status() # Lanza un error si la respuesta es mala (ej: 401, 404)
+    # 1. Inicializar el servicio de Google Calendar
+    google_service = get_calendar_service()
+    if not google_service:
+        print("Error: No se pudo inicializar el servicio de Google Calendar. Abortando.")
+        return # Detiene la ejecución si no podemos conectar con Google
 
-        # Imprimimos la respuesta de forma bonita
-        print("¡Conexión exitosa!")
-        print("Tus tableros son:")
-        pretty_response = json.dumps(response.json(), indent=2)
-        print(pretty_response)
+    # 2. Probar la conexión a Monday (temporalmente)
+    # Por ahora, solo imprimimos un mensaje para confirmar que la clave está cargada.
+    if MONDAY_API_KEY:
+        print("✅ Clave de API de Monday cargada correctamente.")
+    else:
+        print("Error: No se encontró la clave de API de Monday en el archivo .env. Abortando.")
+        return
 
-    except requests.exceptions.HTTPError as err:
-        print(f"Error de HTTP: {err}")
-        print("Verifica que tu clave de API en el archivo .env sea correcta.")
-    except Exception as err:
-        print(f"Ocurrió un error inesperado: {err}")
+    print("\n¡Listo para sincronizar! (próximos pasos aquí)")
 
 
-# Esto hace que la función se ejecute cuando corremos el archivo
 if __name__ == "__main__":
-    probar_conexion_monday()
+    main()
