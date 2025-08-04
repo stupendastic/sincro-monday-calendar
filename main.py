@@ -18,17 +18,19 @@ HEADERS = {"Authorization": MONDAY_API_KEY}
 # --- Fin de la Configuración ---
 
 def get_monday_board_items(board_id, column_ids):
-    """Obtiene todos los elementos de un tablero usando paginación."""
+    """Obtiene todos los elementos de un tablero usando paginación - VERSIÓN LIGERA para filtrar."""
     
     # 1. Inicializar variables
     all_items = []
     cursor = None
     
-    ids_string = '", "'.join(column_ids)
+    # Solo necesitamos las columnas mínimas para filtrar: FechaGrab y Operario
+    filter_columns = ["fecha56", "personas1"]  # IDs de FechaGrab y Operario
+    ids_string = '", "'.join(filter_columns)
 
     # 2. Bucle infinito para paginación
     while True:
-        # 3. Query modificada para aceptar cursor
+        # 3. Query LIGERA para filtrar - solo datos mínimos
         query = f"""
         query($cursor: String) {{
             boards(ids: {board_id}) {{
@@ -36,20 +38,11 @@ def get_monday_board_items(board_id, column_ids):
                     items {{
                         id
                         name
-                        group {{
-                            title
-                        }}
-                        updates {{
-                            body
-                        }}
                         column_values(ids: ["{ids_string}"]) {{
                             id
                             text
                             value
-                            type  # Pedimos el tipo para saber cómo tratarlo
-                            ... on MirrorValue {{
-                                display_value # ¡La clave para las columnas reflejo!
-                            }}
+                            type
                         }}
                     }}
                     cursor
@@ -92,6 +85,105 @@ def get_monday_board_items(board_id, column_ids):
     
     # 5. Devolver la lista completa
     return {'data': {'boards': [{'items_page': {'items': all_items}}]}}
+
+
+def get_single_item_details(item_id):
+    """Obtiene todos los detalles de un item específico de Monday.com."""
+    
+    # Query completa para obtener todos los detalles de un item
+    query = f"""
+    query {{
+        items(ids: [{item_id}]) {{
+            id
+            name
+            group {{
+                title
+            }}
+            updates {{
+                body
+            }}
+            column_values(ids: ["personas1", "fecha56", "color", "bien_estado_volcado", "men__desplegable2", "ubicaci_n", "link_mktcbghq", "lookup_mkteg56h", "lookup_mktetkek", "lookup_mkte8baj", "lookup_mkte7deh", "text_mktfdhm3", "text_mktefg5"]) {{
+                id
+                text
+                value
+                type
+                ... on MirrorValue {{
+                    display_value
+                }}
+            }}
+        }}
+    }}
+    """
+    
+    data = {'query': query}
+    
+    try:
+        response = requests.post(url=MONDAY_API_URL, json=data, headers=HEADERS)
+        response.raise_for_status()
+        response_data = response.json()
+        
+        if 'errors' in response_data:
+            print(f"Error al obtener detalles del item {item_id}: {response_data['errors']}")
+            return None
+        
+        items = response_data.get('data', {}).get('items', [])
+        if items:
+            return items[0]  # Devolver el primer (y único) item
+        else:
+            print(f"No se encontró el item {item_id}")
+            return None
+            
+    except Exception as e:
+        print(f"Error al obtener detalles del item {item_id}: {e}")
+        return None
+
+
+def parse_light_item_for_filtering(item):
+    """Procesa un item ligero para extraer solo la información necesaria para filtrar."""
+    
+    parsed_item = {
+        'id': item.get('id'),
+        'name': item.get('name')
+    }
+
+    # Creamos un diccionario para acceder fácilmente a los valores por su ID
+    column_values_by_id = {cv['id']: cv for cv in item['column_values']}
+
+    # Solo procesamos las columnas necesarias para filtrar
+    # FechaGrab
+    fecha_col = column_values_by_id.get('fecha56')
+    if fecha_col and fecha_col.get('value'):
+        value_data = json.loads(fecha_col['value'])
+        date_value = value_data.get('date')
+        time_value = value_data.get('time')
+        
+        if time_value and time_value != 'null':
+            parsed_item['fecha_inicio'] = f"{date_value}T{time_value}"
+        else:
+            parsed_item['fecha_inicio'] = date_value
+    else:
+        parsed_item['fecha_inicio'] = None
+
+    # Operario
+    operario_col = column_values_by_id.get('personas1')
+    if operario_col:
+        parsed_item['operario'] = operario_col.get('text')
+        
+        # Extraer email del operario
+        if operario_col.get('value'):
+            try:
+                value_data = json.loads(operario_col['value'])
+                persons = value_data.get('personsAndTeams', [])
+                parsed_item['operario_email'] = persons[0].get('email') if persons else None
+            except (json.JSONDecodeError, KeyError):
+                parsed_item['operario_email'] = None
+        else:
+            parsed_item['operario_email'] = None
+    else:
+        parsed_item['operario'] = None
+        parsed_item['operario_email'] = None
+
+    return parsed_item
 
 
 def parse_monday_item(item):
@@ -274,6 +366,65 @@ def update_monday_column(item_id, board_id, column_id, value):
         print(f"❌ ERROR al escribir en Monday: {e}")
         return False
 
+
+def update_monday_date_column(item_id, board_id, column_id, date_value, time_value=None):
+    """
+    Actualiza una columna de fecha en Monday.com usando la regla de oro.
+    
+    Args:
+        item_id: ID del item
+        board_id: ID del tablero
+        column_id: ID de la columna de fecha
+        date_value: Fecha en formato "YYYY-MM-DD"
+        time_value: Hora en formato "HH:MM:SS" (opcional)
+    """
+    
+    # Crear el objeto de fecha según la regla de oro
+    date_object = {"date": date_value}
+    if time_value:
+        date_object["time"] = time_value
+    
+    # Crear el objeto column_values principal
+    column_values = {column_id: date_object}
+    
+    # Aplicar doble JSON.stringify según la regla de oro
+    value_string = json.dumps(json.dumps(column_values))
+    
+    mutation = """
+    mutation ($boardId: Int!, $itemId: Int!, $columnValues: String!) {
+        change_multiple_column_values(board_id: $boardId, item_id: $itemId, column_values: $columnValues) {
+            id
+        }
+    }
+    """
+    
+    variables = {
+        "boardId": board_id,
+        "itemId": int(item_id),
+        "columnValues": value_string
+    }
+    
+    data = {'query': mutation, 'variables': variables}
+    
+    # Mensaje de depuración antes de la llamada
+    print(f"> Escribiendo fecha en Monday... | Item: {item_id} | Columna: {column_id} | Fecha: {date_value} | Hora: {time_value}")
+    
+    try:
+        response = requests.post(url=MONDAY_API_URL, json=data, headers=HEADERS)
+        response.raise_for_status()
+        result = response.json()
+        
+        if 'errors' in result:
+            print(f"❌ ERROR al escribir fecha en Monday: {result['errors']}")
+            return False
+        
+        print(f"✅ Escritura de fecha en Monday OK.")
+        return True
+        
+    except Exception as e:
+        print(f"❌ ERROR al escribir fecha en Monday: {e}")
+        return False
+
 def main():
     """Función principal de la aplicación."""
     print("Iniciando Sincronizador Stupendastic...")
@@ -302,29 +453,27 @@ def main():
         return
 
     items = monday_response.get('data', {}).get('boards', [{}])[0].get('items_page', {}).get('items', [])
-    print(f"Se encontraron {len(items)} elemento(s). Sincronizando...")
+    print(f"Se encontraron {len(items)} elemento(s). Filtrando...")
     print("-" * 40)
 
+    # PASO 1: Filtrar items ligeros
     for item in items:
-        item_procesado = parse_monday_item(item)
-        items_procesados += 1  # Incrementar contador de procesados
+        item_ligero = parse_light_item_for_filtering(item)
+        items_procesados += 1
         
-        # --- LÓGICA DE SINCRONIZACIÓN REFACTORIZADA ---
+        # Comprobamos si el item es apto (tiene fecha y un operario)
+        operario_email = item_ligero.get('operario_email')
+        operario_nombre = item_ligero.get('operario')
         
-        # 1. Obtenemos datos del operario desde Monday
-        operario_email = item_procesado.get('operario_email')
-        operario_nombre = item_procesado.get('operario')
-        
-        # 2. Comprobamos si el item es apto (tiene fecha y un operario)
-        if not operario_nombre or not item_procesado.get('fecha_inicio'):
+        if not operario_nombre or not item_ligero.get('fecha_inicio'):
             if not operario_nombre:
-                print(f"-> Saltando '{item_procesado['name']}': No tiene operario asignado.")
+                print(f"-> Saltando '{item_ligero['name']}': No tiene operario asignado.")
             else:
-                print(f"-> Saltando '{item_procesado['name']}': No tiene fecha asignada.")
+                print(f"-> Saltando '{item_ligero['name']}': No tiene fecha asignada.")
             items_saltados += 1
             continue
 
-        # 3. Buscamos el perfil del filmmaker usando estrategia de dos pasos
+        # Buscamos el perfil del filmmaker usando estrategia de dos pasos
         filmmaker_profile = None
         
         # PASO 1: Match por Email (para miembros completos)
@@ -341,8 +490,19 @@ def main():
                     filmmaker_profile = profile
                     break
         
-        # 4. Si encontramos un perfil, procesamos el evento con lógica de upsert
+        # PASO 2: Si encontramos un perfil, obtenemos los detalles completos del item
         if filmmaker_profile:
+            print(f"✅ Item '{item_ligero['name']}' pasa el filtro. Obteniendo detalles completos...")
+            
+            # Obtener detalles completos del item
+            item_completo = get_single_item_details(item_ligero['id'])
+            if not item_completo:
+                print(f"❌ Error al obtener detalles del item '{item_ligero['name']}'. Saltando...")
+                items_saltados += 1
+                continue
+            
+            # Procesar el item completo
+            item_procesado = parse_monday_item(item_completo)
             calendar_id = filmmaker_profile['calendar_id']
             google_event_id = item_procesado.get('google_event_id')
             
@@ -375,7 +535,7 @@ def main():
             
             print("-" * 20)
         else:
-            print(f"-> Saltando '{item_procesado['name']}': Operario '{operario_nombre}' no encontrado en la configuración.")
+            print(f"-> Saltando '{item_ligero['name']}': Operario '{operario_nombre}' no encontrado en la configuración.")
             items_saltados += 1
 
     # Resumen detallado
