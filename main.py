@@ -252,20 +252,23 @@ def update_monday_column(item_id, board_id, column_id, value):
     
     data = {'query': mutation, 'variables': variables}
     
+    # Mensaje de depuración antes de la llamada
+    print(f"> Escribiendo en Monday... | Item: {item_id} | Columna: {column_id} | Valor: {value}")
+    
     try:
         response = requests.post(url=MONDAY_API_URL, json=data, headers=HEADERS)
         response.raise_for_status()
         result = response.json()
         
         if 'errors' in result:
-            print(f"Error al actualizar columna en Monday: {result['errors']}")
+            print(f"❌ ERROR al escribir en Monday: {result['errors']}")
             return False
         
-        print(f"✅ ID de evento guardado en Monday: {value}")
+        print(f"✅ Escritura en Monday OK.")
         return True
         
     except Exception as e:
-        print(f"Error al actualizar columna en Monday: {e}")
+        print(f"❌ ERROR al escribir en Monday: {e}")
         return False
 
 def main():
@@ -287,7 +290,11 @@ def main():
     print(f"Obteniendo datos del tablero: {config.BOARD_ID_GRABACIONES}...")
     monday_response = get_monday_board_items(config.BOARD_ID_GRABACIONES, config.COLUMN_IDS)
 
-    if not monday_response or 'errors' in monday_response:
+    if not monday_response:
+        print("Error al obtener datos de Monday: No se recibió respuesta")
+        return
+    
+    if 'errors' in monday_response:
         print("Error al obtener datos de Monday:", monday_response.get('errors'))
         return
 
@@ -341,17 +348,17 @@ def main():
             # LÓGICA DE UPSERT
             if google_event_id:
                 # Si ya existe un ID de evento, actualizamos
-                print(f"🔄 Actualizando evento existente: {google_event_id}")
+                print(f"-> [INFO] Item '{item_procesado['name']}' ya tiene evento. Actualizando...")
                 update_google_event(google_service, calendar_id, item_procesado)
                 items_sincronizados += 1
             else:
                 # Si no existe ID, creamos nuevo evento
-                print(f"➕ Creando nuevo evento...")
+                print(f"-> [INFO] Item '{item_procesado['name']}' es nuevo. Creando...")
                 new_event_id = create_google_event(google_service, calendar_id, item_procesado)
                 
                 if new_event_id:
                     # Guardamos el ID del nuevo evento en Monday
-                    print(f"💾 Guardando ID de evento en Monday: {new_event_id}")
+                    print(f"> [DEBUG] Google devolvió el ID: {new_event_id}. Intentando guardarlo en Monday...")
                     update_monday_column(
                         item_procesado['id'], 
                         config.BOARD_ID_GRABACIONES, 
