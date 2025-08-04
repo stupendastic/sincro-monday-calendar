@@ -2,7 +2,7 @@ import os
 import requests
 import json
 from dotenv import load_dotenv
-from google_calendar_service import get_calendar_service, create_google_event, update_google_event
+from google_calendar_service import get_calendar_service, create_google_event, update_google_event, create_and_share_calendar
 
 # Importamos nuestros módulos locales
 import config  # Importa nuestro nuevo archivo de configuración
@@ -169,19 +169,29 @@ def parse_light_item_for_filtering(item):
     if operario_col:
         parsed_item['operario'] = operario_col.get('text')
         
-        # Extraer email del operario
+        # Extraer email y IDs del operario
         if operario_col.get('value'):
             try:
                 value_data = json.loads(operario_col['value'])
                 persons = value_data.get('personsAndTeams', [])
                 parsed_item['operario_email'] = persons[0].get('email') if persons else None
+                
+                # Extraer IDs de todos los operarios asignados
+                operario_ids = []
+                for person in persons:
+                    if person.get('id'):
+                        operario_ids.append(person['id'])
+                parsed_item['operario_ids'] = operario_ids
             except (json.JSONDecodeError, KeyError):
                 parsed_item['operario_email'] = None
+                parsed_item['operario_ids'] = []
         else:
             parsed_item['operario_email'] = None
+            parsed_item['operario_ids'] = []
     else:
         parsed_item['operario'] = None
         parsed_item['operario_email'] = None
+        parsed_item['operario_ids'] = []
 
     return parsed_item
 
@@ -220,14 +230,23 @@ def parse_monday_item(item):
             # El nombre visible del operario ya lo tenemos en el campo 'text'
             parsed_item['operario'] = col_data.get('text')
             
-            # Ahora, extraemos el email del campo 'value'
+            # Ahora, extraemos el email y los IDs del campo 'value'
             if col_data.get('value'):
                 value_data = json.loads(col_data['value'])
                 persons = value_data.get('personsAndTeams', [])
-                # Nos quedamos con el email de la PRIMERA persona asignada (si existe)
+                
+                # Extraer emails
                 parsed_item['operario_email'] = persons[0].get('email') if persons else None
+                
+                # Extraer IDs de todos los operarios asignados
+                operario_ids = []
+                for person in persons:
+                    if person.get('id'):
+                        operario_ids.append(person['id'])
+                parsed_item['operario_ids'] = operario_ids
             else:
                 parsed_item['operario_email'] = None
+                parsed_item['operario_ids'] = []
 
         elif col_name == 'FechaGrab': # Columna de Fecha
             if col_data.get('value'):
@@ -425,6 +444,52 @@ def update_monday_date_column(item_id, board_id, column_id, date_value, time_val
         print(f"❌ ERROR al escribir fecha en Monday: {e}")
         return False
 
+def get_monday_user_directory():
+    """
+    Obtiene el directorio completo de usuarios de Monday.com.
+    
+    Returns:
+        dict: Diccionario donde la clave es el nombre del usuario y el valor es su ID.
+              Ejemplo: {'Arnau Admin': 1234567, 'Jordi Vas': 8901234}
+    """
+    query = """
+    query {
+        users {
+            id
+            name
+            email
+        }
+    }
+    """
+    
+    data = {'query': query}
+    
+    try:
+        print("  -> Obteniendo directorio de usuarios de Monday.com...")
+        response = requests.post(url=MONDAY_API_URL, json=data, headers=HEADERS)
+        response.raise_for_status()
+        response_data = response.json()
+        
+        if 'errors' in response_data:
+            print(f"❌ Error al obtener usuarios de Monday: {response_data['errors']}")
+            return None
+        
+        users = response_data.get('data', {}).get('users', [])
+        user_directory = {}
+        
+        for user in users:
+            user_id = user.get('id')
+            user_name = user.get('name')
+            if user_id and user_name:
+                user_directory[user_name] = user_id
+        
+        print(f"  ✅ Directorio de usuarios obtenido: {len(user_directory)} usuarios encontrados.")
+        return user_directory
+        
+    except Exception as e:
+        print(f"❌ Error al obtener directorio de usuarios de Monday: {e}")
+        return None
+
 def main():
     """Función principal de la aplicación."""
     print("Iniciando Sincronizador Stupendastic...")
@@ -441,6 +506,12 @@ def main():
 
     print("✅ Servicios inicializados.")
 
+    # 2. Obtener directorio de usuarios de Monday.com
+    user_directory = get_monday_user_directory()
+    if not user_directory:
+        print("❌ Error al obtener directorio de usuarios. Abortando.")
+        return
+
     print(f"Obteniendo datos del tablero: {config.BOARD_ID_GRABACIONES}...")
     monday_response = get_monday_board_items(config.BOARD_ID_GRABACIONES, config.COLUMN_IDS)
 
@@ -453,17 +524,18 @@ def main():
         return
 
     items = monday_response.get('data', {}).get('boards', [{}])[0].get('items_page', {}).get('items', [])
-    print(f"Se encontraron {len(items)} elemento(s). Filtrando...")
+    print(f"Se encontraron {len(items)} elemento(s).")
     print("-" * 40)
 
-    # PASO 1: Filtrar items ligeros
+    # PASO 1: Filtrar items ligeros para obtener información básica
+    items_filtrados = []
     for item in items:
         item_ligero = parse_light_item_for_filtering(item)
         items_procesados += 1
         
         # Comprobamos si el item es apto (tiene fecha y un operario)
-        operario_email = item_ligero.get('operario_email')
         operario_nombre = item_ligero.get('operario')
+        operario_ids = item_ligero.get('operario_ids', [])
         
         if not operario_nombre or not item_ligero.get('fecha_inicio'):
             if not operario_nombre:
@@ -472,71 +544,165 @@ def main():
                 print(f"-> Saltando '{item_ligero['name']}': No tiene fecha asignada.")
             items_saltados += 1
             continue
+        
+        items_filtrados.append(item_ligero)
 
-        # Buscamos el perfil del filmmaker usando estrategia de dos pasos
-        filmmaker_profile = None
+    print(f"Items aptos para procesamiento: {len(items_filtrados)}")
+    print("-" * 40)
+
+    # PASO 2: Iterar sobre cada perfil de filmmaker
+    config_updated = False  # Variable para rastrear si se actualizó algún perfil
+    
+    for perfil in config.FILMMAKER_PROFILES:
+        print(f"--- Procesando perfil para: {perfil['monday_name']} ---")
         
-        # PASO 1: Match por Email (para miembros completos)
-        if operario_email:
-            for profile in config.FILMMAKER_PROFILES:
-                if profile['monday_email'] == operario_email:
-                    filmmaker_profile = profile
-                    break
+        # Traducir nombre del perfil a ID de usuario
+        user_id = user_directory.get(perfil['monday_name'])
+        if not user_id:
+            print(f"❌ No se pudo encontrar el ID de usuario para '{perfil['monday_name']}' en Monday.com.")
+            print(f"   Usuarios disponibles: {list(user_directory.keys())}")
+            continue
         
-        # PASO 2: Match por Nombre (para invitados o si no se encontró por email)
-        if not filmmaker_profile:
-            for profile in config.FILMMAKER_PROFILES:
-                if profile['monday_name'] == operario_nombre:
-                    filmmaker_profile = profile
-                    break
+        print(f"   -> ID de usuario encontrado: {user_id}")
         
-        # PASO 2: Si encontramos un perfil, obtenemos los detalles completos del item
-        if filmmaker_profile:
-            print(f"✅ Item '{item_ligero['name']}' pasa el filtro. Obteniendo detalles completos...")
+        # Verificar si el perfil tiene calendar_id configurado
+        if perfil['calendar_id'] is None:
+            print(f"-> [ACCIÓN] El perfil para {perfil['monday_name']} necesita un calendario. Creando ahora...")
+            new_id = create_and_share_calendar(google_service, perfil['monday_name'], perfil['personal_email'])
             
-            # Obtener detalles completos del item
-            item_completo = get_single_item_details(item_ligero['id'])
-            if not item_completo:
-                print(f"❌ Error al obtener detalles del item '{item_ligero['name']}'. Saltando...")
-                items_saltados += 1
-                continue
-            
-            # Procesar el item completo
-            item_procesado = parse_monday_item(item_completo)
-            calendar_id = filmmaker_profile['calendar_id']
-            google_event_id = item_procesado.get('google_event_id')
-            
-            print(f"Procesando '{item_procesado['name']}' para {filmmaker_profile['monday_name']}...")
-            
-            # LÓGICA DE UPSERT
-            if google_event_id:
-                # Si ya existe un ID de evento, actualizamos
-                print(f"-> [INFO] Item '{item_procesado['name']}' ya tiene evento. Actualizando...")
-                update_google_event(google_service, calendar_id, item_procesado)
-                items_sincronizados += 1
+            if new_id:
+                # Actualizar el perfil en memoria
+                perfil['calendar_id'] = new_id
+                config_updated = True
+                print(f"-> [ÉXITO] El perfil de {perfil['monday_name']} ha sido actualizado en memoria con el nuevo ID de calendario.")
             else:
-                # Si no existe ID, creamos nuevo evento
-                print(f"-> [INFO] Item '{item_procesado['name']}' es nuevo. Creando...")
-                new_event_id = create_google_event(google_service, calendar_id, item_procesado)
+                print(f"-> [ERROR] No se pudo crear el calendario para {perfil['monday_name']}. Saltando sincronización.")
+                continue
+        
+        # PASO 3: Iterar sobre todos los items filtrados
+        for item_ligero in items_filtrados:
+            # Comprobar si el ID del usuario del perfil está en la lista de IDs de operarios del item
+            operario_ids = item_ligero.get('operario_ids', [])
+            if user_id in operario_ids:
+                print(f"✅ Coincidencia encontrada para '{item_ligero['name']}' con {perfil['monday_name']} (ID: {user_id})")
                 
-                if new_event_id:
-                    # Guardamos el ID del nuevo evento en Monday
-                    print(f"> [DEBUG] Google devolvió el ID: {new_event_id}. Intentando guardarlo en Monday...")
-                    update_monday_column(
-                        item_procesado['id'], 
-                        config.BOARD_ID_GRABACIONES, 
-                        config.COL_GOOGLE_EVENT_ID, 
-                        new_event_id
-                    )
+                # Obtener detalles completos del item
+                item_completo = get_single_item_details(item_ligero['id'])
+                if not item_completo:
+                    print(f"❌ Error al obtener detalles del item '{item_ligero['name']}'. Saltando...")
+                    items_saltados += 1
+                    continue
+                
+                # Procesar el item completo
+                item_procesado = parse_monday_item(item_completo)
+                calendar_id = perfil['calendar_id']
+                google_event_id = item_procesado.get('google_event_id')
+                
+                print(f"Procesando '{item_procesado['name']}' para {perfil['monday_name']}...")
+                
+                # LÓGICA DE UPSERT
+                if google_event_id:
+                    # Si ya existe un ID de evento, actualizamos
+                    print(f"-> [INFO] Item '{item_procesado['name']}' ya tiene evento. Actualizando...")
+                    update_google_event(google_service, calendar_id, item_procesado)
                     items_sincronizados += 1
                 else:
-                    print(f"❌ Error al crear evento para '{item_procesado['name']}'")
-                    items_saltados += 1
+                    # Si no existe ID, creamos nuevo evento
+                    print(f"-> [INFO] Item '{item_procesado['name']}' es nuevo. Creando...")
+                    new_event_id = create_google_event(google_service, calendar_id, item_procesado)
+                    
+                    if new_event_id:
+                        # Guardamos el ID del nuevo evento en Monday
+                        print(f"> [DEBUG] Google devolvió el ID: {new_event_id}. Intentando guardarlo en Monday...")
+                        update_monday_column(
+                            item_procesado['id'], 
+                            config.BOARD_ID_GRABACIONES, 
+                            config.COL_GOOGLE_EVENT_ID, 
+                            new_event_id
+                        )
+                        items_sincronizados += 1
+                    else:
+                        print(f"❌ Error al crear evento para '{item_procesado['name']}'")
+                        items_saltados += 1
+                
+                print("-" * 20)
+            else:
+                # No hay coincidencia, continuar con el siguiente item
+                continue
+
+    # Mostrar información sobre actualizaciones de configuración
+    if config_updated:
+        print("\n" + "=" * 50)
+        print("⚠️  CONFIGURACIÓN ACTUALIZADA")
+        print("=" * 50)
+        print("Se han creado nuevos calendarios durante esta ejecución.")
+        print("Para hacer permanentes estos cambios, actualiza manualmente config.py")
+        print("con los nuevos calendar_id que se mostraron arriba.")
+        print("=" * 50)
+
+    # Guardar cambios en config.py si se actualizaron perfiles
+    if config_updated:
+        print("\n--- [GUARDANDO] Se han detectado cambios en la configuración. Escribiendo en config.py... ---")
+        
+        try:
+            # Leer el contenido actual del archivo config.py
+            with open('config.py', 'r', encoding='utf-8') as file:
+                config_content = file.read()
             
-            print("-" * 20)
-        else:
-            print(f"-> Saltando '{item_ligero['name']}': Operario '{operario_nombre}' no encontrado en la configuración.")
-            items_saltados += 1
+            # Encontrar la línea donde empieza FILMMAKER_PROFILES
+            lines = config_content.split('\n')
+            new_lines = []
+            in_filmmaker_profiles = False
+            filmmaker_profiles_started = False
+            
+            for line in lines:
+                if line.strip().startswith('FILMMAKER_PROFILES = ['):
+                    # Marcar que hemos encontrado el inicio
+                    filmmaker_profiles_started = True
+                    in_filmmaker_profiles = True
+                    new_lines.append(line)
+                    continue
+                
+                if filmmaker_profiles_started and in_filmmaker_profiles:
+                    # Si estamos dentro de FILMMAKER_PROFILES, saltamos las líneas hasta encontrar el final
+                    if line.strip() == ']':
+                        in_filmmaker_profiles = False
+                        # Escribir la nueva lista de perfiles
+                        new_lines.append('')
+                        for i, perfil in enumerate(config.FILMMAKER_PROFILES):
+                            if i == 0:
+                                new_lines.append('    {')
+                            else:
+                                new_lines.append('    },')
+                                new_lines.append('    {')
+                            
+                            new_lines.append(f'        "monday_name": "{perfil["monday_name"]}",')
+                            new_lines.append(f'        "personal_email": "{perfil["personal_email"]}",')
+                            
+                            if perfil['calendar_id'] is None:
+                                new_lines.append('        "calendar_id": None')
+                            else:
+                                new_lines.append(f'        "calendar_id": "{perfil["calendar_id"]}"')
+                        
+                        new_lines.append('    }')
+                        new_lines.append(']')
+                        continue
+                    else:
+                        # Saltar líneas dentro de FILMMAKER_PROFILES
+                        continue
+                
+                # Si no estamos en FILMMAKER_PROFILES, añadir la línea tal como está
+                new_lines.append(line)
+            
+            # Escribir el archivo actualizado
+            with open('config.py', 'w', encoding='utf-8') as file:
+                file.write('\n'.join(new_lines))
+            
+            print("✅ ¡Archivo config.py actualizado con los nuevos IDs de calendario!")
+            
+        except Exception as e:
+            print(f"❌ Error al actualizar config.py: {e}")
+            print("Los cambios se mantienen solo en memoria. Actualiza manualmente config.py.")
 
     # Resumen detallado
     print("\n" + "=" * 50)

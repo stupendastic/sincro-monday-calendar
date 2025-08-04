@@ -200,3 +200,52 @@ def update_google_event(service, calendar_id, item_data):
     except HttpError as error:
         print(f"  ❌ Error al actualizar evento en Google Calendar: {error}")
         return None
+
+def create_and_share_calendar(service, filmmaker_name, filmmaker_email):
+    """
+    Crea un nuevo calendario de Google y lo comparte con el filmmaker especificado.
+    
+    Args:
+        service: Objeto de servicio de Google Calendar
+        filmmaker_name: Nombre del filmmaker para el título del calendario
+        filmmaker_email: Email del filmmaker para compartir el calendario
+    
+    Returns:
+        str: ID del calendario creado, o None si hubo error
+    """
+    try:
+        # Definir el cuerpo del nuevo calendario
+        calendar_body = {
+            'summary': f"{filmmaker_name} STUPENDASTIC",
+            'timeZone': 'Europe/Madrid'
+        }
+        
+        # Crear el calendario
+        print(f"  -> Creando calendario para {filmmaker_name}...")
+        created_calendar = service.calendars().insert(body=calendar_body).execute()
+        
+        # Obtener el ID del calendario recién creado
+        new_calendar_id = created_calendar.get('id')
+        
+        print(f"  ✅ Calendario creado para {filmmaker_name}.")
+        
+        # Definir la regla de compartición (ACL)
+        rule = {
+            'scope': {
+                'type': 'user',
+                'value': filmmaker_email
+            },
+            'role': 'writer'  # Permisos para añadir y modificar eventos
+        }
+        
+        # Aplicar la regla de compartición
+        print(f"  -> Compartiendo calendario con {filmmaker_email}...")
+        service.acl().insert(calendarId=new_calendar_id, body=rule).execute()
+        
+        print(f"  ↪️  Compartido con {filmmaker_email}.")
+        
+        return new_calendar_id
+        
+    except HttpError as error:
+        print(f"  ❌ Error al crear/compartir calendario para {filmmaker_name}: {error}")
+        return None
