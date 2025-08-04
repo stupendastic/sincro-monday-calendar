@@ -143,11 +143,14 @@ def parse_monday_item(item):
                 date_value = value_data.get('date')
                 time_value = value_data.get('time')
                 
-                if time_value:
-                    # Si hay hora, usamos formato datetime
+                if time_value and time_value != 'null':
+                    # Si hay hora, usamos formato datetime ISO
                     parsed_item['fecha_inicio'] = f"{date_value}T{time_value}"
-                    # Para la fecha fin, asumimos 9 horas de duración
-                    parsed_item['fecha_fin'] = f"{date_value}T{time_value}"  # TODO: calcular hora fin
+                    # Calculamos una hora después para la fecha fin
+                    from datetime import datetime, timedelta
+                    inicio_dt = datetime.fromisoformat(f"{date_value}T{time_value}")
+                    fin_dt = inicio_dt + timedelta(hours=1)
+                    parsed_item['fecha_fin'] = fin_dt.strftime("%Y-%m-%dT%H:%M:%S")
                 else:
                     # Si no hay hora, es evento de día completo
                     parsed_item['fecha_inicio'] = date_value
