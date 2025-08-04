@@ -249,3 +249,56 @@ def create_and_share_calendar(service, filmmaker_name, filmmaker_email):
     except HttpError as error:
         print(f"  ❌ Error al crear/compartir calendario para {filmmaker_name}: {error}")
         return None
+
+
+def register_google_push_notification(service, calendar_id, webhook_url_base):
+    """
+    Registra un canal de notificación push con Google Calendar para un calendario específico.
+    
+    Args:
+        service: Objeto de servicio de Google Calendar
+        calendar_id: ID del calendario a monitorizar
+        webhook_url_base: URL base del webhook (ej: https://abc123.ngrok.io)
+        
+    Returns:
+        bool: True si el registro fue exitoso, False si falló
+    """
+    import uuid
+    
+    try:
+        # Generar IDs únicos para el canal
+        channel_id = str(uuid.uuid4())
+        resource_id = str(uuid.uuid4())
+        
+        # Construir la URL completa del webhook
+        webhook_url = f"{webhook_url_base}/google-webhook"
+        
+        # Definir el cuerpo del canal de notificación
+        channel_body = {
+            'id': channel_id,
+            'type': 'web_hook',
+            'address': webhook_url,
+            'params': {
+                'ttl': '86400'  # Tiempo de vida en segundos (1 día)
+            }
+        }
+        
+        print(f"  -> Registrando canal de notificaciones para calendario {calendar_id}...")
+        print(f"     URL del webhook: {webhook_url}")
+        print(f"     ID del canal: {channel_id}")
+        
+        # Llamar a la API de Google Calendar para registrar el canal
+        response = service.events().watch(
+            calendarId=calendar_id, 
+            body=channel_body
+        ).execute()
+        
+        print(f"  ✅ Canal de notificaciones Google registrado para calendario {calendar_id}.")
+        print(f"     Resource ID: {response.get('resourceId', 'N/A')}")
+        print(f"     Expiración: {response.get('expiration', 'N/A')}")
+        
+        return True
+        
+    except HttpError as error:
+        print(f"  ❌ Error al registrar canal de notificaciones para calendario {calendar_id}: {error}")
+        return False

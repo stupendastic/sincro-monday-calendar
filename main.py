@@ -2,7 +2,7 @@ import os
 import requests
 import json
 from dotenv import load_dotenv
-from google_calendar_service import get_calendar_service, create_google_event, update_google_event, create_and_share_calendar
+from google_calendar_service import get_calendar_service, create_google_event, update_google_event, create_and_share_calendar, register_google_push_notification
 
 # Importamos nuestros módulos locales
 import config  # Importa nuestro nuevo archivo de configuración
@@ -490,6 +490,228 @@ def get_monday_user_directory():
         print(f"❌ Error al obtener directorio de usuarios de Monday: {e}")
         return None
 
+def sincronizar_item_especifico(item_id):
+    """
+    Sincroniza un item específico de Monday.com con Google Calendar.
+    
+    Args:
+        item_id (int): ID del item de Monday.com a sincronizar
+        
+    Returns:
+        bool: True si la sincronización fue exitosa, False en caso contrario
+    """
+    print(f"Iniciando sincronización del item {item_id}...")
+    
+    # 1. Inicializar servicios
+    google_service = get_calendar_service()
+    if not google_service or not MONDAY_API_KEY:
+        print("Error en la inicialización de servicios. Abortando.")
+        return False
+
+    print("✅ Servicios inicializados.")
+
+    # 2. Obtener directorio de usuarios de Monday.com
+    user_directory = get_monday_user_directory()
+    if not user_directory:
+        print("❌ Error al obtener directorio de usuarios. Abortando.")
+        return False
+
+    # 3. Obtener detalles completos del item específico
+    item_completo = get_single_item_details(item_id)
+    if not item_completo:
+        print(f"❌ Error al obtener detalles del item {item_id}. Abortando.")
+        return False
+    
+    # 4. Procesar el item
+    item_procesado = parse_monday_item(item_completo)
+    
+    # 5. Verificar que el item tiene fecha y operario
+    if not item_procesado.get('fecha_inicio'):
+        print(f"❌ Item {item_id} no tiene fecha asignada. Saltando.")
+        return False
+    
+    operario_nombre = item_procesado.get('operario')
+    if not operario_nombre:
+        print(f"❌ Item {item_id} no tiene operario asignado. Saltando.")
+        return False
+    
+    # 6. Buscar el perfil del filmmaker correspondiente
+    perfil_encontrado = None
+    user_id = None
+    
+    for perfil in config.FILMMAKER_PROFILES:
+        if perfil['monday_name'] == operario_nombre:
+            perfil_encontrado = perfil
+            user_id = user_directory.get(perfil['monday_name'])
+            break
+    
+    if not perfil_encontrado:
+        print(f"❌ No se encontró perfil para el operario '{operario_nombre}'.")
+        print(f"   Perfiles disponibles: {[p['monday_name'] for p in config.FILMMAKER_PROFILES]}")
+        return False
+    
+    if not user_id:
+        print(f"❌ No se pudo encontrar el ID de usuario para '{operario_nombre}' en Monday.com.")
+        return False
+    
+    print(f"✅ Perfil encontrado para: {operario_nombre} (ID: {user_id})")
+    
+    # 7. Verificar si el perfil tiene calendar_id configurado
+    if perfil_encontrado['calendar_id'] is None:
+        print(f"-> [ACCIÓN] El perfil para {operario_nombre} necesita un calendario. Creando ahora...")
+        new_id = create_and_share_calendar(google_service, operario_nombre, perfil_encontrado['personal_email'])
+        
+        if new_id:
+            # Actualizar el perfil en memoria
+            perfil_encontrado['calendar_id'] = new_id
+            print(f"-> [ÉXITO] El perfil de {operario_nombre} ha sido actualizado con el nuevo ID de calendario.")
+        else:
+            print(f"-> [ERROR] No se pudo crear el calendario para {operario_nombre}. Abortando.")
+            return False
+    
+    # 8. Ejecutar la lógica de crear/actualizar el evento en Google Calendar
+    calendar_id = perfil_encontrado['calendar_id']
+    google_event_id = item_procesado.get('google_event_id')
+    
+    print(f"Procesando '{item_procesado['name']}' para {operario_nombre}...")
+    
+    # LÓGICA DE UPSERT
+    if google_event_id:
+        # Si ya existe un ID de evento, actualizamos
+        print(f"-> [INFO] Item '{item_procesado['name']}' ya tiene evento. Actualizando...")
+        success = update_google_event(google_service, calendar_id, item_procesado)
+        if success:
+            print(f"✅ Evento actualizado exitosamente para '{item_procesado['name']}'")
+            return True
+        else:
+            print(f"❌ Error al actualizar evento para '{item_procesado['name']}'")
+            return False
+    else:
+        # Si no existe ID, creamos nuevo evento
+        print(f"-> [INFO] Item '{item_procesado['name']}' es nuevo. Creando...")
+        new_event_id = create_google_event(google_service, calendar_id, item_procesado)
+        
+        if new_event_id:
+            # Guardamos el ID del nuevo evento en Monday
+            print(f"> [DEBUG] Google devolvió el ID: {new_event_id}. Guardándolo en Monday...")
+            update_success = update_monday_column(
+                item_procesado['id'], 
+                config.BOARD_ID_GRABACIONES, 
+                config.COL_GOOGLE_EVENT_ID, 
+                new_event_id
+            )
+            if update_success:
+                print(f"✅ Evento creado y guardado exitosamente para '{item_procesado['name']}'")
+                return True
+            else:
+                print(f"⚠️  Evento creado pero no se pudo guardar el ID en Monday")
+                return True  # Consideramos éxito porque el evento se creó
+        else:
+            print(f"❌ Error al crear evento para '{item_procesado['name']}'")
+            return False
+
+
+def actualizar_fecha_en_monday(google_event_id, nueva_fecha_inicio, nueva_fecha_fin):
+    """
+    Actualiza la fecha de un item en Monday.com basándose en cambios en Google Calendar.
+    
+    Args:
+        google_event_id (str): ID del evento de Google Calendar
+        nueva_fecha_inicio (str): Nueva fecha de inicio en formato ISO
+        nueva_fecha_fin (str): Nueva fecha de fin en formato ISO
+        
+    Returns:
+        bool: True si la actualización fue exitosa, False en caso contrario
+    """
+    print(f"🔄 Buscando item en Monday con Google Event ID: {google_event_id}")
+    
+    # 1. Buscar el item en Monday.com usando items_by_column_values
+    query = f"""
+    query {{
+        items_by_column_values(board_id: {config.BOARD_ID_GRABACIONES}, column_id: "{config.COL_GOOGLE_EVENT_ID}", column_value: "{google_event_id}") {{
+            id
+            name
+            board {{
+                id
+            }}
+        }}
+    }}
+    """
+    
+    data = {'query': query}
+    
+    try:
+        print(f"  -> Buscando item en Monday.com...")
+        response = requests.post(url=MONDAY_API_URL, json=data, headers=HEADERS)
+        response.raise_for_status()
+        response_data = response.json()
+        
+        if 'errors' in response_data:
+            print(f"❌ Error al buscar item en Monday: {response_data['errors']}")
+            return False
+        
+        items = response_data.get('data', {}).get('items_by_column_values', [])
+        
+        if not items:
+            print(f"❌ No se encontró ningún item en Monday con Google Event ID: {google_event_id}")
+            return False
+        
+        # Tomar el primer item encontrado (debería ser solo uno)
+        item = items[0]
+        item_id = item.get('id')
+        board_id = item.get('board', {}).get('id')
+        item_name = item.get('name')
+        
+        print(f"✅ Item encontrado: '{item_name}' (ID: {item_id}, Board: {board_id})")
+        
+        # 2. Preparar las nuevas fechas para Monday
+        # Monday espera fecha en formato "YYYY-MM-DD" y hora en "HH:MM:SS"
+        from datetime import datetime
+        
+        # Parsear la fecha de inicio
+        if 'T' in nueva_fecha_inicio:
+            # Evento con hora específica
+            inicio_dt = datetime.fromisoformat(nueva_fecha_inicio.replace('Z', '+00:00'))
+            fecha_monday = inicio_dt.strftime("%Y-%m-%d")
+            hora_monday = inicio_dt.strftime("%H:%M:%S")
+        else:
+            # Evento de día completo
+            fecha_monday = nueva_fecha_inicio
+            hora_monday = None
+        
+        print(f"  -> Actualizando fecha en Monday: {fecha_monday} {hora_monday if hora_monday else '(día completo)'}")
+        
+        # 3. Actualizar la columna de fecha en Monday
+        if hora_monday:
+            # Evento con hora específica
+            success = update_monday_date_column(
+                item_id, 
+                board_id, 
+                config.COL_FECHA_GRAB, 
+                fecha_monday, 
+                hora_monday
+            )
+        else:
+            # Evento de día completo
+            success = update_monday_date_column(
+                item_id, 
+                board_id, 
+                config.COL_FECHA_GRAB, 
+                fecha_monday
+            )
+        
+        if success:
+            print(f"✅ Fecha actualizada exitosamente en Monday para '{item_name}'")
+            return True
+        else:
+            print(f"❌ Error al actualizar fecha en Monday para '{item_name}'")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error al actualizar fecha en Monday: {e}")
+        return False
+
+
 def main():
     """Función principal de la aplicación."""
     print("Iniciando Sincronizador Stupendastic...")
@@ -506,7 +728,16 @@ def main():
 
     print("✅ Servicios inicializados.")
 
-    # 2. Obtener directorio de usuarios de Monday.com
+    # 2. Obtener URL de ngrok para webhooks
+    NGROK_URL = os.getenv("NGROK_PUBLIC_URL")
+    if not NGROK_URL:
+        print("⚠️  NGROK_PUBLIC_URL no está configurada en .env")
+        print("   Los canales de notificación push no se registrarán.")
+        print("   Añade NGROK_PUBLIC_URL=https://tu-url.ngrok.io a tu archivo .env")
+    else:
+        print(f"✅ URL de ngrok configurada: {NGROK_URL}")
+
+    # 3. Obtener directorio de usuarios de Monday.com
     user_directory = get_monday_user_directory()
     if not user_directory:
         print("❌ Error al obtener directorio de usuarios. Abortando.")
@@ -578,6 +809,19 @@ def main():
             else:
                 print(f"-> [ERROR] No se pudo crear el calendario para {perfil['monday_name']}. Saltando sincronización.")
                 continue
+        
+        # REGISTRAR CANAL DE NOTIFICACIONES PUSH DE GOOGLE
+        if NGROK_URL and perfil['calendar_id']:
+            print(f"-> [NOTIFICACIONES] Registrando canal push para {perfil['monday_name']}...")
+            push_success = register_google_push_notification(
+                google_service, 
+                perfil['calendar_id'], 
+                NGROK_URL
+            )
+            if push_success:
+                print(f"✅ Canal de notificaciones registrado para {perfil['monday_name']}")
+            else:
+                print(f"⚠️  No se pudo registrar canal de notificaciones para {perfil['monday_name']}")
         
         # PASO 3: Iterar sobre todos los items filtrados
         for item_ligero in items_filtrados:
