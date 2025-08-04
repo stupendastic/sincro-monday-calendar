@@ -62,7 +62,8 @@ def create_google_event(service, calendar_id, item_data):
         dropbox_link_html = '<i>Sin link a Dropbox Dron</i>'
     
     # Construimos la descripción del evento usando HTML para que se vea bien
-    description = f"""<b>Grupo:</b> {item_data.get('group_title', 'N/A')}
+    description = f"""<b>Cliente:</b> {item_data.get('cliente', 'N/A')}
+<b>Grupo:</b> {item_data.get('group_title', 'N/A')}
 <b>📋 Estado Permisos:</b> {item_data.get('estadopermisos', 'N/A')}
 <b>🛠️ Acciones a Realizar:</b> {item_data.get('accionesrealizar', 'N/A')}
 
@@ -134,7 +135,8 @@ def update_google_event(service, calendar_id, item_data):
         dropbox_link_html = '<i>Sin link a Dropbox Dron</i>'
     
     # Construimos la descripción del evento usando HTML para que se vea bien
-    description = f"""<b>Grupo:</b> {item_data.get('group_title', 'N/A')}
+    description = f"""<b>Cliente:</b> {item_data.get('cliente', 'N/A')}
+<b>Grupo:</b> {item_data.get('group_title', 'N/A')}
 <b>📋 Estado Permisos:</b> {item_data.get('estadopermisos', 'N/A')}
 <b>🛠️ Acciones a Realizar:</b> {item_data.get('accionesrealizar', 'N/A')}
 
