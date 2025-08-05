@@ -1,108 +1,329 @@
-# Sincro Monday Calendar
+# Sincro Monday Calendar - Sistema de Sincronización Inteligente
 
-Proyecto para sincronización de eventos entre Monday.com y Google Calendar.
+Sistema avanzado de sincronización bidireccional entre Monday.com y Google Calendar con arquitectura "Master-Copia" para gestión de múltiples filmmakers.
 
-## Descripción
+## 🎯 Descripción General
 
-Este proyecto permite sincronizar automáticamente eventos de Monday.com con Google Calendar, creando eventos detallados con toda la información relevante del proyecto.
+Este proyecto implementa un sistema de sincronización inteligente que mantiene perfectamente sincronizados los eventos de Monday.com con Google Calendar, utilizando una arquitectura "Master-Copia" que permite asignar eventos a múltiples filmmakers sin conflictos.
 
-## Configuración
+### Características Principales
 
-1. **Instalar dependencias Python:**
+- ✅ **Arquitectura Master-Copia**: Un evento maestro central + copias automáticas para cada filmmaker
+- ✅ **Sincronización Bidireccional**: Monday ↔ Google Calendar
+- ✅ **Webhooks Automáticos**: Respuesta inmediata a cambios en Monday.com
+- ✅ **Gestión Multi-Filmmaker**: Soporte para múltiples operarios por evento
+- ✅ **Limpieza Automática**: Eliminación de copias obsoletas
+- ✅ **Eventos Sin Asignar**: Gestión de eventos sin operario específico
+
+## 🏗️ Arquitectura del Sistema
+
+### Arquitectura "Master-Copia"
+
+```
+Monday.com Item
+    ↓
+Evento Maestro (Calendario Central)
+    ↓
+Copias Automáticas (Calendarios Personales)
+```
+
+#### Componentes:
+
+1. **Evento Maestro**: 
+   - Ubicado en `config.MASTER_CALENDAR_ID`
+   - Contiene toda la información del evento
+   - Incluye link directo a Monday.com
+   - Es la "fuente única de verdad"
+
+2. **Copias de Filmmakers**:
+   - Una copia por cada filmmaker asignado
+   - Ubicadas en calendarios personales de cada filmmaker
+   - Vinculadas al evento maestro mediante `extended_properties`
+   - Se crean/actualizan/eliminan automáticamente
+
+3. **Eventos Sin Asignar**:
+   - Ubicados en `config.UNASSIGNED_CALENDAR_ID`
+   - Para eventos sin operario específico
+   - No son parte de la arquitectura Master-Copia
+
+## 🔄 Flujo de Trabajo Completo
+
+### 1. Trigger: Webhook de Monday.com
+```
+Monday.com → POST /monday-webhook → item_id
+```
+
+### 2. Procesamiento del Item
+```python
+# Obtener datos completos de Monday
+item_completo = get_single_item_details(item_id)
+item_procesado = parse_monday_item(item_completo)
+```
+
+### 3. Decisión de Ruta
+
+#### 3A. Items Sin Operarios
+```python
+if not operario_ids:
+    # → Calendario UNASSIGNED_CALENDAR_ID
+    # → NO es parte de Master-Copia
+```
+
+#### 3B. Items Con Operarios
+```python
+# → Arquitectura Master-Copia
+```
+
+### 4. Sincronización del Evento Maestro
+```python
+# Siempre usar MASTER_CALENDAR_ID
+if google_event_id:
+    update_google_event(MASTER_CALENDAR_ID, item_data)
+else:
+    new_event_id = create_google_event(MASTER_CALENDAR_ID, item_data)
+    # Guardar ID en Monday
+    update_monday_column(item_id, COL_GOOGLE_EVENT_ID, new_event_id)
+```
+
+### 5. Creación/Actualización de Copias
+```python
+for filmmaker in operarios_asignados:
+    existing_copy = find_event_copy_by_master_id(calendar_id, master_event_id)
+    
+    if not existing_copy:
+        # Crear nueva copia
+        create_google_event(calendar_id, item_data, extended_props)
+    else:
+        # Actualizar copia existente
+        update_google_event_by_id(calendar_id, copy_id, item_data)
+```
+
+### 6. Limpieza de Copias Obsoletas
+```python
+# Encontrar copias anteriores
+operarios_con_copia_anterior = buscar_copias_existentes()
+
+# Calcular diferencias
+calendarios_a_limpiar = operarios_con_copia_anterior - operarios_actuales
+
+# Eliminar copias obsoletas
+for calendar_id in calendarios_a_limpiar:
+    delete_event_by_id(calendar_id, copy_id)
+```
+
+## 📋 Configuración del Sistema
+
+### 1. Variables de Entorno Requeridas
+
+```bash
+# Monday.com API
+MONDAY_API_KEY=your_monday_api_key
+
+# Google Calendar (generado automáticamente)
+GOOGLE_TOKEN_JSON={"token_type": "Bearer", "access_token": "...", ...}
+```
+
+### 2. Configuración de Calendarios
+
+```python
+# config.py
+MASTER_CALENDAR_ID = "c_4db25ae132f391943ecad1b9ef49076a143d88739b7ad7c4378db60c070abf39@group.calendar.google.com"
+UNASSIGNED_CALENDAR_ID = "c_52a614880d3306538360d3a8353dc3aec730ca6bafef182fdf956af03e900657@group.calendar.google.com"
+```
+
+### 3. Perfiles de Filmmakers
+
+```python
+FILMMAKER_PROFILES = [
+    {
+        "monday_name": "Arnau Admin",
+        "personal_email": "seonrtn@gmail.com",
+        "calendar_id": "c_59e3a26fba95603b4d085cc0c672573d52c1fd98d4b1e96b08b846c8be800c1a@group.calendar.google.com",
+        "monday_user_id": None  # Se resuelve automáticamente
+    },
+    # ... más perfiles
+]
+```
+
+## 🚀 Instalación y Configuración
+
+### 1. Instalar Dependencias
 ```bash
 pip install -r requirements.txt
 ```
 
-2. **Configurar credenciales:**
-   - Crear archivo `credentials.json` con las credenciales de Google API
-   - Configurar `MONDAY_API_KEY` en variables de entorno
+### 2. Configurar Credenciales
+```bash
+# Crear archivo .env con:
+MONDAY_API_KEY=tu_api_key_de_monday
+```
 
-3. **Autorizar Google Calendar:**
+### 3. Autorizar Google Calendar
 ```bash
 python autorizar_google.py
 ```
 
-4. **Ejecutar sincronización:**
+### 4. Iniciar Servidor Webhook
 ```bash
-python main.py
+python app.py
 ```
 
-## Estructura del Proyecto
+## 🔧 Funcionalidades del Sistema
 
-- `main.py` - Script principal de sincronización
-- `config.py` - Configuración de IDs y perfiles
-- `google_calendar_service.py` - Servicios de Google Calendar
-- `autorizar_google.py` - Script de autorización de Google
-- `requirements.txt` - Dependencias Python
+### Sincronización Automática
+- **Webhooks de Monday**: Respuesta inmediata a cambios
+- **Webhooks de Google**: Sincronización inversa (Google → Monday)
+- **Upsert Inteligente**: Crear/actualizar según estado actual
 
-## Funcionalidades
+### Gestión de Múltiples Filmmakers
+- **Asignación Dinámica**: Soporte para 1, 3, 10+ filmmakers por evento
+- **Vinculación Inteligente**: Cada copia tiene referencia al evento maestro
+- **Limpieza Automática**: Eliminación de copias cuando se desasigna filmmaker
 
-- ✅ Sincronización automática de eventos
-- ✅ Filtrado por operario y fecha
-- ✅ Creación/actualización de eventos (upsert)
-- ✅ Paginación para manejar grandes volúmenes de datos
-- ✅ Optimización de consultas API (estrategia de dos pasos)
-- ✅ Formato detallado de eventos con contactos y enlaces
+### Eventos Detallados
+- **Información Completa**: Cliente, grupo, estado de permisos, acciones
+- **Contactos Formateados**: Obra y comerciales con teléfonos
+- **Enlaces Directos**: Link a Monday.com y Dropbox
+- **Updates del Item**: Historial de actualizaciones
 
-## Regla de Oro para Fechas en Monday.com API
+## ⚠️ Posibles Fallos y Soluciones
 
-### El Problema
-La API de Monday.com es muy específica sobre cómo manejar las columnas de tipo "Fecha". Después de extensa investigación, hemos descubierto la regla de oro.
-
-### La Solución
-
-#### 1. Formato del Objeto
-Cuando quieras establecer o actualizar una columna de fecha que incluye una hora, siempre debes proporcionar un objeto JavaScript con dos claves: `date` y `time`.
-
-```javascript
-const dateValue = {
-  date: "YYYY-MM-DD", // El día, mes y año
-  time: "HH:MM:SS"    // La hora, minutos y segundos
-};
+### 1. Error de Credenciales Google
 ```
-
-**Formato de fecha:** Debe ser un string en formato `YYYY-MM-DD`
-**Formato de hora:** Debe ser un string en formato `HH:MM:SS` (formato de 24 horas)
-
-#### 2. El "Doble Stringify"
-Aquí está el truco que nos ha costado tanto descubrir. Cuando construyes la mutation de GraphQL, Monday no quiere recibir el objeto directamente. Quiere recibir un string que contenga un string JSON.
-
-Esto se logra con un doble `JSON.stringify`:
-
-```javascript
-// Primer JSON.stringify
-'{"date0":{"date":"2025-08-10","time":"14:30:00"},"status":{"index":4}}'
-
-// Segundo JSON.stringify (formato final que la API espera)
-'"{\\"date0\\":{\\"date\\":\\"2025-08-10\\",\\"time\\":\\"14:30:00\\"},\\"status\\":{\\"index\\":4}}"'
+❌ GOOGLE_TOKEN_JSON no encontrado
 ```
+**Solución**: Ejecutar `python autorizar_google.py`
 
-#### 3. Implementación en Python
+### 2. Filmmaker No Encontrado
+```
+❌ No se encontró perfil para el operario 'Nombre'
+```
+**Solución**: Añadir perfil en `config.FILMMAKER_PROFILES`
+
+### 3. Calendario No Configurado
+```
+❌ El perfil necesita un calendario. Creando ahora...
+```
+**Solución**: El sistema crea automáticamente el calendario
+
+### 4. Error de API Monday
+```
+❌ Error al obtener detalles del item
+```
+**Solución**: Verificar `MONDAY_API_KEY` y permisos
+
+### 5. Copias No Sincronizadas
+```
+❌ Error al crear copia para calendario
+```
+**Solución**: Verificar permisos de escritura en calendarios de filmmakers
+
+## 🔄 Acciones Manuales Ocasionales
+
+### 1. Añadir Nuevo Filmmaker
+1. Añadir perfil en `config.FILMMAKER_PROFILES`
+2. El sistema creará automáticamente su calendario
+3. No requiere reinicio del servidor
+
+### 2. Cambiar Calendario Maestro
+1. Actualizar `MASTER_CALENDAR_ID` en `config.py`
+2. Los eventos existentes mantendrán su ID en Monday
+3. Las copias se recrearán automáticamente
+
+### 3. Limpiar Eventos Obsoletos
 ```python
-# Crear el objeto de fecha
-date_object = {"date": "2025-08-10", "time": "14:30:00"}
-
-# Crear el objeto column_values principal
-column_values = {column_id: date_object}
-
-# Aplicar doble JSON.stringify
-value_string = json.dumps(json.dumps(column_values))
+# Función disponible para limpieza manual
+delete_event_by_id(service, calendar_id, event_id)
 ```
 
-### Resumen de la Regla de Oro
-Para actualizar una columna de Fecha y Hora en Monday a través de la API:
-1. Crea un objeto JS `{ date: "YYYY-MM-DD", time: "HH:MM:SS" }`
-2. Insértalo en el objeto `column_values` principal
-3. Aplica `JSON.stringify()` dos veces a ese objeto `column_values`
-4. Inyecta el resultado en tu mutation de GraphQL
+### 4. Regenerar Credenciales Google
+```bash
+# Eliminar GOOGLE_TOKEN_JSON del .env
+# Ejecutar:
+python autorizar_google.py
+```
 
-### Función Implementada
-El proyecto incluye la función `update_monday_date_column()` que implementa esta regla de oro automáticamente.
+## 📊 Monitoreo y Logs
 
-## Tecnologías
+### Logs del Sistema
+```
+✅ Servicios inicializados.
+🔄 Iniciando sincronización de copias para filmmakers...
+  -> Filmmakers asignados: 3 calendarios
+  -> [ACCIÓN] Creando copia para el filmmaker...
+  ✅ Copia creada exitosamente
+🧹 Iniciando limpieza de copias obsoletas...
+  -> [ACCIÓN] Eliminando copia obsoleta...
+  ✅ Copia eliminada exitosamente
+```
 
-- Python 3.x
-- Google Calendar API
-- Monday.com GraphQL API
-- Requests (HTTP client)
-- Google Auth libraries 
+### Endpoints de Monitoreo
+- `GET /`: Estado del servidor
+- `POST /monday-webhook`: Webhook de Monday.com
+- `POST /google-webhook`: Webhook de Google Calendar
+
+## 🛠️ Estructura del Proyecto
+
+```
+sincro-monday-calendar/
+├── app.py                    # Servidor Flask con webhooks
+├── sync_logic.py            # Lógica principal de sincronización
+├── google_calendar_service.py # Servicios de Google Calendar
+├── monday_service.py        # Servicios de Monday.com
+├── config.py               # Configuración centralizada
+├── autorizar_google.py     # Script de autorización Google
+├── requirements.txt        # Dependencias Python
+└── README.md              # Este archivo
+```
+
+## 🔗 Integración con Monday.com
+
+### Configuración de Webhook
+1. En Monday.com, ir a Integrations → Webhooks
+2. URL: `https://tu-dominio.com/monday-webhook`
+3. Eventos: Item Created, Item Updated, Item Deleted
+
+### Columnas Requeridas
+- **Operario**: Columna de personas (personas1)
+- **Fecha Grab**: Columna de fecha (fecha56)
+- **ID Evento Google**: Columna de texto (text_mktfdhm3)
+- **Cliente**: Columna de texto (text_mktefg5)
+- **Link Dropbox**: Columna de link (link_mktcbghq)
+- **Contactos**: Columnas de lookup (lookup_mkteg56h, etc.)
+
+## 🎯 Casos de Uso
+
+### Escenario 1: Asignación Única
+- Item asignado a 1 filmmaker
+- Se crea evento maestro + 1 copia
+- Monday guarda ID del evento maestro
+
+### Escenario 2: Asignación Múltiple
+- Item asignado a 3 filmmakers
+- Se crea evento maestro + 3 copias
+- Cada copia tiene referencia al maestro
+- Monday guarda solo ID del evento maestro
+
+### Escenario 3: Cambio de Asignación
+- Item cambia de Arnau → Jordi
+- Se actualiza evento maestro
+- Se crea copia para Jordi
+- Se elimina copia de Arnau
+
+### Escenario 4: Evento Sin Asignar
+- Item sin operario específico
+- Se crea en calendario UNASSIGNED
+- No es parte de arquitectura Master-Copia
+
+## 🚀 Tecnologías Utilizadas
+
+- **Python 3.x**: Lógica principal
+- **Flask**: Servidor webhook
+- **Google Calendar API**: Gestión de calendarios
+- **Monday.com GraphQL API**: Integración con Monday
+- **Requests**: Cliente HTTP
+- **Google Auth**: Autenticación OAuth2
+
+---
+
+**Desarrollado para Stupendastic** - Sistema de sincronización inteligente para gestión de proyectos audiovisuales. 

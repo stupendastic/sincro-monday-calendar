@@ -3,7 +3,7 @@ import json
 import os
 from dotenv import load_dotenv
 from google_calendar_service import get_calendar_service
-from main import actualizar_fecha_en_monday, sincronizar_item_especifico
+from sync_logic import actualizar_fecha_en_monday, sincronizar_item_especifico
 
 # Cargar variables de entorno
 load_dotenv()
@@ -113,17 +113,15 @@ def handle_google_webhook():
                                     start = event.get('start', {})
                                     end = event.get('end', {})
                                     
-                                    start_date = start.get('dateTime') or start.get('date')
-                                    end_date = end.get('dateTime') or end.get('date')
-                                    
-                                    if start_date and end_date:
-                                        print(f"📅 Fechas del evento: {start_date} -> {end_date}")
+                                    if start and end:
+                                        print(f"📅 Fechas del evento: {start} -> {end}")
                                         
                                         # Actualizar la fecha en Monday.com
+                                        # Pasamos los diccionarios completos de Google Calendar
                                         success = actualizar_fecha_en_monday(
                                             event_id, 
-                                            start_date, 
-                                            end_date
+                                            start, 
+                                            end
                                         )
                                         
                                         if success:
