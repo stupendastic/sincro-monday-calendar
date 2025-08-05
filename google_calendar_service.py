@@ -62,89 +62,26 @@ def get_calendar_service():
         print(f"Ocurrió un error al construir el servicio de Google: {error}")
         return None
 
-def create_google_event(service, calendar_id, item_data, extended_properties=None, board_id=None):
+def create_google_event(service, calendar_id, event_body, extended_properties=None):
     """
-    Crea un nuevo evento en un calendario de Google a partir de datos procesados de Monday.
+    Crea un nuevo evento en un calendario de Google.
     
     Args:
         service: Objeto de servicio de Google Calendar
         calendar_id: ID del calendario donde crear el evento
-        item_data: Datos del evento procesados de Monday
+        event_body: Diccionario con el cuerpo del evento (summary, description, start, end, etc.)
         extended_properties: Propiedades extendidas opcionales para el evento
-        board_id: ID del tablero de Monday para generar el link
     """
-    # Lógica del Link de Dropbox
-    dropbox_link = item_data.get('linkdropbox', '')
-    if dropbox_link:
-        dropbox_link_html = f'<a href="{dropbox_link}">Abrir Enlace</a>'
-    else:
-        dropbox_link_html = '<i>Sin link a Dropbox Dron</i>'
+    # Crear una copia del event_body para no modificar el original
+    event = event_body.copy()
     
-    # Generar link a Monday si se proporciona board_id
-    monday_link = ""
-    if board_id and item_data.get('id'):
-        monday_link = f'<b>🔗 Link a Monday:</b> <a href="https://monday.com/boards/{board_id}/pulses/{item_data["id"]}">Ver Item</a>'
-    
-    # Construimos la descripción del evento usando HTML para que se vea bien
-    description = f"""<b>Cliente:</b> {item_data.get('cliente', 'N/A')}
-<b>Grupo:</b> {item_data.get('group_title', 'N/A')}
-<b>📋 Estado Permisos:</b> {item_data.get('estadopermisos', 'N/A')}
-<b>🛠️ Acciones a Realizar:</b> {item_data.get('accionesrealizar', 'N/A')}
-
-<b>--- 📞 Contactos de Obra ---</b>
-{item_data.get('contacto_obra_formateado', 'No disponible')}
-
-<b>--- 👤 Contactos Comerciales ---</b>
-{item_data.get('contacto_comercial_formateado', 'No disponible')}
-
-<b>--- 🔗 Enlaces y Novedades ---</b>
-{monday_link}
-<b>Link Dropbox Dron:</b> {dropbox_link_html}
-<b>Updates en el elemento en Monday:</b>
-{item_data.get('all_updates_html', '<i>Sin updates.</i>')}
-    """
-
-    # Determinar si es evento de día completo o con hora específica
-    fecha_inicio = item_data['fecha_inicio']
-    fecha_fin = item_data['fecha_fin']
-    
-    if 'T' in fecha_inicio:
-        # Evento con hora específica
-        event = {
-            'summary': item_data['name'],
-            'location': item_data.get('ubicacion', ''),
-            'description': description,
-            'guestsCanModify': False,
-            'start': {
-                'dateTime': fecha_inicio,
-                'timeZone': 'Europe/Madrid',
-            },
-            'end': {
-                'dateTime': fecha_fin,
-                'timeZone': 'Europe/Madrid',
-            },
-        }
-    else:
-        # Evento de día completo
-        event = {
-            'summary': item_data['name'],
-            'location': item_data.get('ubicacion', ''),
-            'description': description,
-            'guestsCanModify': False,
-            'start': {
-                'date': fecha_inicio,
-            },
-            'end': {
-                'date': fecha_fin,
-            },
-        }
-
     # Añadir propiedades extendidas si se proporcionan
     if extended_properties:
         event['extendedProperties'] = extended_properties
 
     try:
-        print(f"  -> Creando evento en Google Calendar: '{item_data['name']}'")
+        event_name = event.get('summary', 'Sin título')
+        print(f"  -> Creando evento en Google Calendar: '{event_name}'")
         created_event = service.events().insert(calendarId=calendar_id, body=event).execute()
         print(f"  ✅ ¡Evento creado! ID: {created_event.get('id')}")
         return created_event.get('id')
@@ -152,94 +89,23 @@ def create_google_event(service, calendar_id, item_data, extended_properties=Non
         print(f"  ❌ Error al crear evento en Google Calendar: {error}")
         return None
 
-def update_google_event(service, calendar_id, item_data, extended_properties=None, board_id=None):
+def update_google_event(service, calendar_id, event_id, event_body):
     """
-    Actualiza un evento existente en Google Calendar a partir de datos procesados de Monday.
+    Actualiza un evento existente en Google Calendar.
     
     Args:
         service: Objeto de servicio de Google Calendar
         calendar_id: ID del calendario donde actualizar el evento
-        item_data: Datos del evento procesados de Monday
-        extended_properties: Propiedades extendidas opcionales para el evento
-        board_id: ID del tablero de Monday para generar el link
+        event_id: ID del evento a actualizar
+        event_body: Diccionario con el cuerpo del evento (summary, description, start, end, etc.)
     """
-    # Lógica del Link de Dropbox
-    dropbox_link = item_data.get('linkdropbox', '')
-    if dropbox_link:
-        dropbox_link_html = f'<a href="{dropbox_link}">Abrir Enlace</a>'
-    else:
-        dropbox_link_html = '<i>Sin link a Dropbox Dron</i>'
-    
-    # Generar link a Monday si se proporciona board_id
-    monday_link = ""
-    if board_id and item_data.get('id'):
-        monday_link = f'<b>🔗 Link a Monday:</b> <a href="https://monday.com/boards/{board_id}/pulses/{item_data["id"]}">Ver Item</a>'
-    
-    # Construimos la descripción del evento usando HTML para que se vea bien
-    description = f"""<b>Cliente:</b> {item_data.get('cliente', 'N/A')}
-<b>Grupo:</b> {item_data.get('group_title', 'N/A')}
-<b>📋 Estado Permisos:</b> {item_data.get('estadopermisos', 'N/A')}
-<b>🛠️ Acciones a Realizar:</b> {item_data.get('accionesrealizar', 'N/A')}
-
-<b>--- 📞 Contactos de Obra ---</b>
-{item_data.get('contacto_obra_formateado', 'No disponible')}
-
-<b>--- 👤 Contactos Comerciales ---</b>
-{item_data.get('contacto_comercial_formateado', 'No disponible')}
-
-<b>--- 🔗 Enlaces y Novedades ---</b>
-{monday_link}
-<b>Link Dropbox Dron:</b> {dropbox_link_html}
-<b>Updates en el elemento en Monday:</b>
-{item_data.get('all_updates_html', '<i>Sin updates.</i>')}
-    """
-
-    # Determinar si es evento de día completo o con hora específica
-    fecha_inicio = item_data['fecha_inicio']
-    fecha_fin = item_data['fecha_fin']
-    
-    if 'T' in fecha_inicio:
-        # Evento con hora específica
-        event = {
-            'summary': item_data['name'],
-            'location': item_data.get('ubicacion', ''),
-            'description': description,
-            'guestsCanModify': False,
-            'start': {
-                'dateTime': fecha_inicio,
-                'timeZone': 'Europe/Madrid',
-            },
-            'end': {
-                'dateTime': fecha_fin,
-                'timeZone': 'Europe/Madrid',
-            },
-        }
-    else:
-        # Evento de día completo
-        event = {
-            'summary': item_data['name'],
-            'location': item_data.get('ubicacion', ''),
-            'description': description,
-            'guestsCanModify': False,
-            'start': {
-                'date': fecha_inicio,
-            },
-            'end': {
-                'date': fecha_fin,
-            },
-        }
-
-    # Añadir propiedades extendidas si se proporcionan
-    if extended_properties:
-        event['extendedProperties'] = extended_properties
-
     try:
-        event_id = item_data['google_event_id']
-        print(f"  -> Actualizando evento en Google Calendar: '{item_data['name']}' (ID: {event_id})")
+        event_name = event_body.get('summary', 'Sin título')
+        print(f"  -> Actualizando evento en Google Calendar: '{event_name}' (ID: {event_id})")
         updated_event = service.events().update(
             calendarId=calendar_id, 
             eventId=event_id, 
-            body=event
+            body=event_body
         ).execute()
         print(f"  ✅ ¡Evento actualizado! ID: {updated_event.get('id')}")
         return updated_event.get('id')
@@ -307,7 +173,7 @@ def register_google_push_notification(service, calendar_id, webhook_url_base):
         webhook_url_base: URL base del webhook (ej: https://abc123.ngrok.io)
         
     Returns:
-        bool: True si el registro fue exitoso, False si falló
+        tuple: (bool, str) - (éxito, channel_id si exitoso)
     """
     import uuid
     
@@ -343,13 +209,13 @@ def register_google_push_notification(service, calendar_id, webhook_url_base):
         print(f"     Resource ID: {response.get('resourceId', 'N/A')}")
         print(f"     Expiración: {response.get('expiration', 'N/A')}")
         
-        return True
+        return True, channel_id
         
     except HttpError as error:
         print(f"  ❌ Error al registrar canal de notificaciones para calendario {calendar_id}: {error}")
-        return False
+        return False, None
 
-def update_google_event_by_id(service, calendar_id, event_id, item_data, extended_properties=None, board_id=None):
+def update_google_event_by_id(service, calendar_id, event_id, event_body, extended_properties=None):
     """
     Actualiza un evento específico en Google Calendar por su ID.
     
@@ -357,82 +223,19 @@ def update_google_event_by_id(service, calendar_id, event_id, item_data, extende
         service: Objeto de servicio de Google Calendar
         calendar_id: ID del calendario donde actualizar el evento
         event_id: ID específico del evento a actualizar
-        item_data: Datos del evento procesados de Monday
+        event_body: Diccionario con el cuerpo del evento (summary, description, start, end, etc.)
         extended_properties: Propiedades extendidas opcionales para el evento
-        board_id: ID del tablero de Monday para generar el link
     """
-    # Lógica del Link de Dropbox
-    dropbox_link = item_data.get('linkdropbox', '')
-    if dropbox_link:
-        dropbox_link_html = f'<a href="{dropbox_link}">Abrir Enlace</a>'
-    else:
-        dropbox_link_html = '<i>Sin link a Dropbox Dron</i>'
+    # Crear una copia del event_body para no modificar el original
+    event = event_body.copy()
     
-    # Generar link a Monday si se proporciona board_id
-    monday_link = ""
-    if board_id and item_data.get('id'):
-        monday_link = f'<b>🔗 Link a Monday:</b> <a href="https://monday.com/boards/{board_id}/pulses/{item_data["id"]}">Ver Item</a>'
-    
-    # Construimos la descripción del evento usando HTML para que se vea bien
-    description = f"""<b>Cliente:</b> {item_data.get('cliente', 'N/A')}
-<b>Grupo:</b> {item_data.get('group_title', 'N/A')}
-<b>📋 Estado Permisos:</b> {item_data.get('estadopermisos', 'N/A')}
-<b>🛠️ Acciones a Realizar:</b> {item_data.get('accionesrealizar', 'N/A')}
-
-<b>--- 📞 Contactos de Obra ---</b>
-{item_data.get('contacto_obra_formateado', 'No disponible')}
-
-<b>--- 👤 Contactos Comerciales ---</b>
-{item_data.get('contacto_comercial_formateado', 'No disponible')}
-
-<b>--- 🔗 Enlaces y Novedades ---</b>
-{monday_link}
-<b>Link Dropbox Dron:</b> {dropbox_link_html}
-<b>Updates en el elemento en Monday:</b>
-{item_data.get('all_updates_html', '<i>Sin updates.</i>')}
-    """
-
-    # Determinar si es evento de día completo o con hora específica
-    fecha_inicio = item_data['fecha_inicio']
-    fecha_fin = item_data['fecha_fin']
-    
-    if 'T' in fecha_inicio:
-        # Evento con hora específica
-        event = {
-            'summary': item_data['name'],
-            'location': item_data.get('ubicacion', ''),
-            'description': description,
-            'guestsCanModify': False,
-            'start': {
-                'dateTime': fecha_inicio,
-                'timeZone': 'Europe/Madrid',
-            },
-            'end': {
-                'dateTime': fecha_fin,
-                'timeZone': 'Europe/Madrid',
-            },
-        }
-    else:
-        # Evento de día completo
-        event = {
-            'summary': item_data['name'],
-            'location': item_data.get('ubicacion', ''),
-            'description': description,
-            'guestsCanModify': False,
-            'start': {
-                'date': fecha_inicio,
-            },
-            'end': {
-                'date': fecha_fin,
-            },
-        }
-
     # Añadir propiedades extendidas si se proporcionan
     if extended_properties:
         event['extendedProperties'] = extended_properties
 
     try:
-        print(f"  -> Actualizando evento en Google Calendar: '{item_data['name']}' (ID: {event_id})")
+        event_name = event_body.get('summary', 'Sin título')
+        print(f"  -> Actualizando evento en Google Calendar: '{event_name}' (ID: {event_id})")
         updated_event = service.events().update(
             calendarId=calendar_id, 
             eventId=event_id, 

@@ -6,10 +6,14 @@ BOARD_ID_GRABACIONES = 3324095194
 # --- CONFIGURACIÓN DE CALENDARIOS MAESTROS ---
 
 # ID del calendario maestro donde se centralizarán todos los eventos
-MASTER_CALENDAR_ID = "c_4db25ae132f391943ecad1b9ef49076a143d88739b7ad7c4378db60c070abf39@group.calendar.google.com"
+# MASTER_CALENDAR_ID = "c_54252371e4711a101b072dd3715ed3aadcf71ac45af65b988a5a7d272ffbe31d@group.calendar.google.com"
+# MASTER_CALENDAR_ID = "c_54252371e4711a101b072dd3715ed3aadcf71ac45af65b988a5a7d272ffbe31d@group.calendar.google.com"
+MASTER_CALENDAR_ID = "c_54252371e4711a101b072dd3715ed3aadcf71ac45af65b988a5a7d272ffbe31d@group.calendar.google.com"
 
 # ID del calendario para eventos sin asignar
-UNASSIGNED_CALENDAR_ID = "c_52a614880d3306538360d3a8353dc3aec730ca6bafef182fdf956af03e900657@group.calendar.google.com"
+# UNASSIGNED_CALENDAR_ID = "c_49d5be3fada7594d92ff64036b07afb75c4c83436844cb1f3c834bc9e31d4e2e@group.calendar.google.com"
+# UNASSIGNED_CALENDAR_ID = "c_49d5be3fada7594d92ff64036b07afb75c4c83436844cb1f3c834bc9e31d4e2e@group.calendar.google.com"
+UNASSIGNED_CALENDAR_ID = "c_49d5be3fada7594d92ff64036b07afb75c4c83436844cb1f3c834bc9e31d4e2e@group.calendar.google.com"
 
 # IDs de las columnas que queremos leer del tablero
 COLUMN_IDS = [
@@ -54,6 +58,9 @@ COL_GOOGLE_EVENT_ID = "text_mktfdhm3"
 # ID de la columna para el cliente
 COL_CLIENTE = "text_mktefg5"
 
+# ID de la columna para la fecha de grabación
+COL_FECHA_GRAB = "fecha56"
+
 # --- CONFIGURACIÓN DE FILMMAKERS ---
 
 # Lista de perfiles de filmmakers
@@ -63,43 +70,43 @@ FILMMAKER_PROFILES = [
     {
         "monday_name": "Arnau Admin",
         "personal_email": "seonrtn@gmail.com",
-        "calendar_id": "c_59e3a26fba95603b4d085cc0c672573d52c1fd98d4b1e96b08b846c8be800c1a@group.calendar.google.com",
+        "calendar_id": "c_e3eb24d0025d12e9f506b9b988563f744cc59f7869d7c79aaca7ab9043769d85@group.calendar.google.com",
         "monday_user_id": None
     },
     {
         "monday_name": "Xavi Alba",
         "personal_email": "retrobcn365@gmail.com",
-        "calendar_id": "c_a80927ecf0d03dcd054477b44ac8d74abf9cf6245ff0bee2dfec72d9050b0683@group.calendar.google.com",
+        "calendar_id": "c_69308b9a3d04d3f03b5de726e8c1e39c55993896c4e5bf4fa43c15ea30304841@group.calendar.google.com",
         "monday_user_id": None
     },
     {
         "monday_name": "Oriol",
         "personal_email": "orioldevigoprat@gmail.com",
-        "calendar_id": "c_cc448b4b77516c4f5a48be282ec844316fa4cb5fa3003cb5187ae72ebe74d83e@group.calendar.google.com",
+        "calendar_id": "c_3f590bced29ca0483a2ea4ef2596cb4cd6f05245ffeef5887b96c4921ac48412@group.calendar.google.com",
         "monday_user_id": None
     },
     {
         "monday_name": "Jordi Vas",
         "personal_email": "jordivas94@gmail.com",
-        "calendar_id": "c_085d9236303489b51ccdf60a932e9477162c7ec66add17501b8f949343037e7e@group.calendar.google.com",
+        "calendar_id": "c_7bebe0169cb41ecba6662220c3699628a3bfa5f1c82b7a1d816ab495298a5c63@group.calendar.google.com",
         "monday_user_id": None
     },
     {
         "monday_name": "Rubén García",
         "personal_email": "rgarriscado@gmail.com",
-        "calendar_id": "c_b0c49b5f37b32c3b18bf61538c2d5bc201effdb4848737ea18c4dae2c34163ab@group.calendar.google.com",
+        "calendar_id": "c_7b9e66757dacfbda0f0224b6fc04ca477ceac501ab42ae1834b2ccdbeb53528e@group.calendar.google.com",
         "monday_user_id": None
     },
     {
         "monday_name": "Tono Burguete",
         "personal_email": "infotonoburguete@gmail.com",
-        "calendar_id": "c_0ae0b93dcc19c0ae1912d06563ef63e142dea6abddf23dd41d28cf7f65bf1120@group.calendar.google.com",
+        "calendar_id": "c_e35f6a0f60db31f23bac8481e81ad877521ca86d6fae11bc0a9d52c9b25ee1cd@group.calendar.google.com",
         "monday_user_id": None
     },
     {
         "monday_name": "Josep",
         "personal_email": "films.pep@gmail.com",
-        "calendar_id": "c_097379e79f8344e974c206a87608e26edf2a1132b344f0298bd8f524982a55a1@group.calendar.google.com",
+        "calendar_id": "c_9b7f0685a7a9436ae17d102933065432c4597791b0f5ec796a0851f76b54b11f@group.calendar.google.com",
         "monday_user_id": None
     }
 ]

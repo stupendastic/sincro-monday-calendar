@@ -2,8 +2,9 @@ from flask import Flask, request, jsonify
 import json
 import os
 from dotenv import load_dotenv
-from google_calendar_service import get_calendar_service
-from sync_logic import actualizar_fecha_en_monday, sincronizar_item_especifico
+from google_calendar_service import get_calendar_service, get_recently_updated_events
+from sync_logic import sincronizar_item_via_webhook, _obtener_item_id_por_google_event_id
+from monday_api_handler import MondayAPIHandler
 
 # Cargar variables de entorno
 load_dotenv()
@@ -11,8 +12,9 @@ load_dotenv()
 # Creamos la aplicación Flask
 app = Flask(__name__)
 
-# Inicializar el servicio de Google Calendar
-google_service = get_calendar_service()
+# Inicializar servicios globales UNA SOLA VEZ
+google_service_global = get_calendar_service()
+monday_handler_global = MondayAPIHandler(api_token=os.getenv("MONDAY_API_KEY"))
 
 @app.route('/')
 def home():
@@ -47,15 +49,19 @@ def handle_monday_webhook():
         if item_id:
             print(f"-> [WEBHOOK MONDAY] Recibido cambio en item ID: {item_id}. Disparando sincronización...")
             
-            # Llamar a nuestra función principal de sincronización
+            # Llamar a nuestra función optimizada de sincronización para webhooks
             try:
-                success = sincronizar_item_especifico(item_id)
+                success = sincronizar_item_via_webhook(
+                    item_id, 
+                    monday_handler=monday_handler_global,
+                    google_service=google_service_global
+                )
                 if success:
-                    print(f"✅ Sincronización completada exitosamente para item {item_id}")
+                    print(f"✅ Sincronización webhook completada exitosamente para item {item_id}")
                 else:
-                    print(f"❌ Error en sincronización para item {item_id}")
+                    print(f"❌ Error en sincronización webhook para item {item_id}")
             except Exception as e:
-                print(f"❌ Error inesperado durante sincronización: {e}")
+                print(f"❌ Error inesperado durante sincronización webhook: {e}")
         else:
             print("⚠️  No se pudo extraer el ID del item del webhook")
         
@@ -67,6 +73,7 @@ def handle_monday_webhook():
 def handle_google_webhook():
     """
     Este endpoint recibirá las notificaciones push de Google Calendar.
+    Implementa la nueva lógica precisa para sincronización Google -> Monday.
     """
     print("\n--- ¡Notificación Push de Google Calendar Recibida! ---")
     
@@ -83,69 +90,93 @@ def handle_google_webhook():
     
     # Extraer información del evento cambiado
     try:
-        # El resource_id en las cabeceras contiene información sobre el evento
-        resource_id = request.headers.get('X-Goog-Resource-Id')
-        resource_uri = request.headers.get('X-Goog-Resource-Uri')
+        # 1. Cargar el mapeo de canales
+        channel_map_file = "google_channel_map.json"
+        if not os.path.exists(channel_map_file):
+            print("❌ Error: Archivo google_channel_map.json no encontrado")
+            print("   Ejecuta init_google_notifications.py para crear el mapeo de canales")
+            return '', 200
         
-        if resource_uri:
-            # Extraer el event_id del resource_uri
-            # El formato es: https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events/{event_id}
-            import re
-            event_match = re.search(r'/events/([^/]+)$', resource_uri)
-            if event_match:
-                event_id = event_match.group(1)
-                print(f"🔄 Evento detectado: {event_id}")
+        try:
+            with open(channel_map_file, 'r', encoding='utf-8') as f:
+                channel_map = json.load(f)
+            print(f"✅ Mapeo de canales cargado: {len(channel_map)} canales registrados")
+        except Exception as e:
+            print(f"❌ Error al cargar mapeo de canales: {e}")
+            return '', 200
+        
+        # 2. Obtener el channel_id
+        channel_id = request.headers.get('X-Goog-Channel-Id')
+        if not channel_id:
+            print("❌ No se pudo obtener el channel_id de X-Goog-Channel-Id")
+            return '', 200
+        
+        print(f"📡 Channel ID detectado: {channel_id}")
+        
+        # 3. Buscar el calendar_id_real en el mapeo
+        calendar_id_real = channel_map.get(channel_id)
+        if not calendar_id_real:
+            print(f"❌ Error: Channel ID '{channel_id}' no encontrado en el mapeo de canales")
+            print(f"   Canales disponibles: {list(channel_map.keys())}")
+            return '', 200
+        
+        print(f"📅 Calendar ID real encontrado: {calendar_id_real}")
+        
+        # 4. Nueva lógica precisa: obtener eventos realmente actualizados
+        if google_service_global:
+            try:
+                # Obtener eventos actualizados recientemente (últimos 5 minutos)
+                eventos_cambiados = get_recently_updated_events(google_service_global, calendar_id_real, minutes_ago=5)
                 
-                # Obtener los detalles actualizados del evento desde Google Calendar
-                if google_service:
-                    try:
-                        # Buscar el evento en todos los calendarios configurados
-                        import config
-                        for perfil in config.FILMMAKER_PROFILES:
-                            if perfil['calendar_id']:
-                                try:
-                                    event = google_service.events().get(
-                                        calendarId=perfil['calendar_id'],
-                                        eventId=event_id
-                                    ).execute()
-                                    
-                                    # Extraer las fechas del evento
-                                    start = event.get('start', {})
-                                    end = event.get('end', {})
-                                    
-                                    if start and end:
-                                        print(f"📅 Fechas del evento: {start} -> {end}")
-                                        
-                                        # Actualizar la fecha en Monday.com
-                                        # Pasamos los diccionarios completos de Google Calendar
-                                        success = actualizar_fecha_en_monday(
-                                            event_id, 
-                                            start, 
-                                            end
-                                        )
-                                        
-                                        if success:
-                                            print(f"✅ Sincronización inversa completada para evento {event_id}")
-                                        else:
-                                            print(f"❌ Error en sincronización inversa para evento {event_id}")
-                                        
-                                        # Solo procesar el primer evento encontrado
-                                        break
-                                        
-                                except Exception as e:
-                                    # El evento no está en este calendario, continuar con el siguiente
-                                    continue
-                        else:
-                            print(f"⚠️  Evento {event_id} no encontrado en ningún calendario configurado")
-                            
-                    except Exception as e:
-                        print(f"❌ Error al obtener detalles del evento: {e}")
-                else:
-                    print("❌ Servicio de Google Calendar no disponible")
-            else:
-                print("❌ No se pudo extraer el event_id del resource_uri")
+                if not eventos_cambiados:
+                    print("ℹ️  No se encontraron eventos actualizados recientemente")
+                    return '', 200
+                
+                print(f"🔄 Procesando {len(eventos_cambiados)} eventos actualizados...")
+                
+                # 5. Iterar sobre cada evento cambiado
+                for evento_cambiado_real in eventos_cambiados:
+                    print(f"\n📋 Procesando evento: '{evento_cambiado_real.get('summary', 'Sin título')}'")
+                    
+                    # 6. Extraer master_event_id de extendedProperties
+                    extended_props = evento_cambiado_real.get('extendedProperties', {})
+                    private_props = extended_props.get('private', {})
+                    master_event_id = private_props.get('master_event_id')
+                    
+                    if not master_event_id:
+                        print(f"  ⚠️  Evento sin master_event_id, usando su propio ID: {evento_cambiado_real.get('id')}")
+                        master_event_id = evento_cambiado_real.get('id')
+                    
+                    print(f"  🔍 Master Event ID: {master_event_id}")
+                    
+                    # 7. Encontrar el item_id de Monday correspondiente
+                    item_id = _obtener_item_id_por_google_event_id(master_event_id, monday_handler_global)
+                    
+                    if item_id:
+                        print(f"  ✅ Item de Monday encontrado: {item_id}")
+                        
+                        # 8. Sincronizar el item de Monday
+                        try:
+                            success = sincronizar_item_via_webhook(
+                                item_id, 
+                                monday_handler=monday_handler_global,
+                                google_service=google_service_global
+                            )
+                            if success:
+                                print(f"  ✅ Sincronización completada para item {item_id}")
+                            else:
+                                print(f"  ❌ Error en sincronización para item {item_id}")
+                        except Exception as e:
+                            print(f"  ❌ Error inesperado durante sincronización: {e}")
+                    else:
+                        print(f"  ❌ No se encontró item de Monday para master_event_id: {master_event_id}")
+                
+                print(f"\n✅ Procesamiento completado para {len(eventos_cambiados)} eventos")
+                    
+            except Exception as e:
+                print(f"❌ Error al procesar eventos actualizados: {e}")
         else:
-            print("⚠️  No se encontró X-Goog-Resource-Uri en las cabeceras")
+            print("❌ Servicio de Google Calendar no disponible")
             
     except Exception as e:
         print(f"❌ Error procesando webhook de Google: {e}")
