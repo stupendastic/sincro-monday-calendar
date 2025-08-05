@@ -607,12 +607,20 @@ sincro-monday-calendar/
 ├── google_calendar_service.py # Servicios de Google Calendar
 ├── monday_api_handler.py    # Handler avanzado para Monday.com API
 ├── monday_service.py        # Servicios legacy de Monday.com
+├── main.py                  # Script principal de sincronización
 ├── init_google_notifications.py # Script para activar notificaciones push
 ├── webhook_channel_mapper.py # Ejemplo de uso del mapeo de canales
 ├── google_channel_map.json # Mapeo channel_id -> calendar_id (generado automáticamente)
 ├── config.py               # Configuración centralizada
 ├── autorizar_google.py     # Script de autorización Google
 ├── requirements.txt        # Dependencias Python
+├── scripts_pruebas/       # 📁 Scripts de pruebas y debugging
+│   ├── README.md          # Documentación de scripts
+│   ├── test_simple_completo.py # Suite principal de pruebas
+│   ├── test_prueba_2.py  # Prueba específica Google → Monday
+│   ├── debug_*.py        # Scripts de debugging
+│   ├── cleanup_*.py      # Scripts de limpieza
+│   └── TESTING_README.md # Documentación de pruebas
 └── README.md              # Este archivo
 ```
 
@@ -647,7 +655,7 @@ El sistema incluye una suite completa de pruebas para validar la sincronización
 
 #### 1. **test_simple_completo.py** - Suite Principal
 ```bash
-python test_simple_completo.py
+python scripts_pruebas/test_simple_completo.py
 ```
 
 **Escenarios de Prueba:**
@@ -659,7 +667,7 @@ python test_simple_completo.py
 
 #### 2. **test_prueba_2.py** - Prueba Específica de Sincronización Inversa
 ```bash
-python test_prueba_2.py
+python scripts_pruebas/test_prueba_2.py
 ```
 
 **Valida específicamente:**
@@ -671,7 +679,7 @@ python test_prueba_2.py
 
 #### 3. **get_user_id.py** - Herramienta de Debugging
 ```bash
-python get_user_id.py
+python scripts_pruebas/get_user_id.py
 ```
 
 **Obtiene:**
