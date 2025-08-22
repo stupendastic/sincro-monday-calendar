@@ -17,9 +17,9 @@ def get_calendar_service():
     """
     creds = None
     
-    # El archivo token.json almacena los tokens de acceso y actualización del usuario
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    # El archivo config/token.json almacena los tokens de acceso y actualización del usuario
+    if os.path.exists('config/token.json'):
+        creds = Credentials.from_authorized_user_file('config/token.json', SCOPES)
     
     # Si no hay credenciales válidas disponibles, deja que el usuario se autentique
     if not creds or not creds.valid:
@@ -30,7 +30,7 @@ def get_calendar_service():
             creds = flow.run_local_server(port=0)
         
         # Guarda las credenciales para la próxima ejecución
-        with open('token.json', 'w') as token:
+        with open('config/token.json', 'w') as token:
             token.write(creds.to_json())
     
     try:

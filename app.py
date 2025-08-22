@@ -147,9 +147,9 @@ def handle_google_webhook():
     # Extraer información del evento cambiado
     try:
         # 1. Cargar el mapeo de canales
-        channel_map_file = "google_channel_map.json"
+        channel_map_file = "config/channels/config/channels/google_channel_map.json"
         if not os.path.exists(channel_map_file):
-            print("❌ Error: Archivo google_channel_map.json no encontrado")
+            print("❌ Error: Archivo config/channels/google_channel_map.json no encontrado")
             return '', 200
         
         with open(channel_map_file, 'r', encoding='utf-8') as f:

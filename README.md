@@ -631,26 +631,59 @@ python init_google_notifications.py
 
 ```
 sincro-monday-calendar/
-├── app.py                    # Servidor Flask con webhooks
-├── sync_logic.py            # Lógica principal de sincronización (con puertas de seguridad)
-├── google_calendar_service.py # Servicios de Google Calendar
-├── monday_api_handler.py    # Handler avanzado para Monday.com API
-├── monday_service.py        # Servicios legacy de Monday.com
-├── main.py                  # Script principal de sincronización
-├── init_google_notifications.py # Script para activar notificaciones push
-├── webhook_channel_mapper.py # Ejemplo de uso del mapeo de canales
-├── google_channel_map.json # Mapeo channel_id -> calendar_id (generado automáticamente)
-├── config.py               # Configuración centralizada
-├── autorizar_google.py     # Script de autorización Google
-├── requirements.txt        # Dependencias Python
-├── scripts_pruebas/       # 📁 Scripts de pruebas y debugging
-│   ├── README.md          # Documentación de scripts
-│   ├── test_simple_completo.py # Suite principal de pruebas
-│   ├── test_prueba_2.py  # Prueba específica Google → Monday
-│   ├── debug_*.py        # Scripts de debugging
-│   ├── cleanup_*.py      # Scripts de limpieza
-│   └── TESTING_README.md # Documentación de pruebas
-└── README.md              # Este archivo
+├── app.py                           # Servidor Flask principal
+├── sync_logic.py                    # Lógica de sincronización
+├── config.py                        # Configuración centralizada
+├── monday_api_handler.py            # Handler para Monday.com API
+├── google_calendar_service.py       # Servicios de Google Calendar
+├── sync_token_manager.py            # Gestión de tokens de sincronización
+├── main.py                          # Script principal de inicialización
+├── monday_service.py                # Servicios de Monday.com
+├── requirements.txt                 # Dependencias del proyecto
+├── .env                             # Variables de entorno (crear)
+├── .gitignore                       # Archivos ignorados por Git
+├── README.md                        # Este archivo
+├── ngrok.yml                        # Configuración de ngrok
+├── venv/                            # Entorno virtual Python
+├── config/                          # Configuración del sistema
+│   ├── README.md                    # Documentación de configuración
+│   ├── token.json                   # Token de Google Calendar (generado)
+│   ├── sync_tokens.json             # Tokens de sincronización (generado)
+│   ├── channels/                    # Configuración de canales
+│   │   ├── google_channel_map.json  # Mapeo channel_id -> calendar_id
+│   │   ├── google_channel_info_master.json # Info del canal maestro
+│   │   └── google_channel_info_*.json # Info de canales personales
+│   └── webhooks/                    # Configuración de webhooks
+│       └── webhooks_personales_info.json # Info de webhooks personales
+├── scripts/                         # Scripts del sistema
+│   ├── README.md                    # Documentación de scripts
+│   ├── testing/                     # Scripts de testing y configuración
+│   │   ├── configurar_*.py          # Configuración de webhooks
+│   │   ├── probar_*.py              # Scripts de prueba
+│   │   ├── test_*.py                # Scripts de testing automatizado
+│   │   ├── verificar_*.py           # Scripts de verificación
+│   │   ├── monitor_*.py             # Scripts de monitoreo
+│   │   ├── simular_*.py             # Scripts de simulación
+│   │   ├── crear_*.py               # Scripts de creación
+│   │   ├── forzar_*.py              # Scripts de forzado
+│   │   ├── buscar_*.py              # Scripts de búsqueda
+│   │   ├── listar_*.py              # Scripts de listado
+│   │   ├── limpiar_*.py             # Scripts de limpieza
+│   │   └── actualizar_*.py          # Scripts de actualización
+│   ├── legacy/                      # Scripts obsoletos
+│   │   ├── autorizar_google.py      # Autorización de Google (versión anterior)
+│   │   ├── init_google_notifications.py # Inicialización de notificaciones
+│   │   ├── fix_master_event_id.py   # Corrección de IDs de eventos maestros
+│   │   ├── migrate_existing_events.py # Migración de eventos existentes
+│   │   └── prueba_completa_sistema.py # Pruebas completas del sistema
+│   └── utilities/                   # Scripts de utilidades
+│       ├── webhook_channel_mapper.py # Mapeo de canales de webhooks
+│       ├── update_paths.py          # Actualización de rutas
+│       ├── fix_imports.py           # Arreglo de importaciones
+│       └── verify_organization.py   # Verificación de organización
+└── docs/                            # Documentación
+    ├── README.md                    # Documentación general
+    └── PLAN_PRUEBAS_MANUALES.md     # Plan de pruebas manuales
 ```
 
 ### Funciones Clave en `sync_logic.py`

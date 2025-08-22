@@ -11,7 +11,7 @@ from datetime import datetime
 class SyncTokenManager:
     """Gestiona sync tokens para múltiples calendarios"""
     
-    def __init__(self, file_path="sync_tokens.json"):
+    def __init__(self, file_path="config/config/sync_tokens.json"):
         self.file_path = file_path
         self.tokens = self._load_tokens()
     
