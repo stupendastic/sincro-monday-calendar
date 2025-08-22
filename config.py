@@ -61,6 +61,21 @@ COL_CLIENTE = "text_mktefg5"
 # ID de la columna para la fecha de grabación
 COL_FECHA_GRAB = "fecha56"
 
+# Alias para compatibilidad
+COL_FECHA = COL_FECHA_GRAB
+
+# --- CONFIGURACIÓN DE AUTOMATIZACIÓN ---
+
+# Usuario que representa la automatización del sistema
+# Cuando este usuario hace cambios, sabemos que es el sistema sincronizando (no un usuario real)
+AUTOMATION_USER_NAME = "Arnau Admin"
+AUTOMATION_USER_ID = 34210704  # ID de Monday.com para Arnau Admin
+
+# Configuración de cooldowns para evitar bucles
+SYNC_COOLDOWN_SECONDS = 3  # Tiempo mínimo entre sincronizaciones del mismo item (reducido para UUIDs)
+AUTOMATION_DETECTION_WINDOW = 60  # Tiempo para detectar cambios de automatización (segundos)
+CONFLICT_RESOLUTION_WINDOW = 30  # Ventana para resolver conflictos entre Monday y Google (segundos)
+
 # --- CONFIGURACIÓN DE FILMMAKERS ---
 
 # Lista de perfiles de filmmakers

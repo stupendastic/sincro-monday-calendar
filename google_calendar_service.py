@@ -1,65 +1,43 @@
 import os
 import json
-from dotenv import load_dotenv, set_key
+import time
+from datetime import datetime, timedelta
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-# Cargar variables de entorno
-load_dotenv()
-
-# Alcance de permisos: Acceso total a los calendarios.
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
-CREDS_FILE = "credentials.json"
+# Configuración de la API de Google Calendar
+SCOPES = ['https://www.googleapis.com/auth/calendar']
 
 def get_calendar_service():
     """
-    Crea y devuelve un objeto de servicio para interactuar con la API de Google Calendar.
-    Reutiliza las credenciales desde la variable de entorno GOOGLE_TOKEN_JSON.
+    Obtiene el servicio de Google Calendar autenticado.
     """
     creds = None
     
-    # Buscar las credenciales en la variable de entorno GOOGLE_TOKEN_JSON
-    token_json = os.getenv('GOOGLE_TOKEN_JSON')
+    # El archivo token.json almacena los tokens de acceso y actualización del usuario
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
     
-    if token_json:
-        try:
-            # Cargar credenciales desde la variable de entorno
-            creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
-        except Exception as e:
-            print(f"Error al cargar credenciales desde GOOGLE_TOKEN_JSON: {e}")
-            print("Por favor, ejecuta autorizar_google.py para regenerar las credenciales.")
-            return None
-    else:
-        # Si no existe la variable de entorno, mostrar error claro
-        print("❌ GOOGLE_TOKEN_JSON no encontrado. Por favor, ejecuta autorizar_google.py primero.")
-        return None
-    
-    # Si no hay credenciales válidas disponibles, intentar refrescar
+    # Si no hay credenciales válidas disponibles, deja que el usuario se autentique
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-                # Guardar las credenciales actualizadas en la variable de entorno
-                set_key('.env', 'GOOGLE_TOKEN_JSON', creds.to_json())
-                print("✅ Token refrescado y guardado en .env")
-            except Exception as e:
-                print(f"Error al refrescar el token: {e}")
-                print("Por favor, ejecuta autorizar_google.py para regenerar las credenciales.")
-                return None
+            creds.refresh(Request())
         else:
-            print("❌ Credenciales no válidas. Por favor, ejecuta autorizar_google.py primero.")
-            return None
-
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        
+        # Guarda las credenciales para la próxima ejecución
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+    
     try:
-        # Construye el objeto de servicio que nos permitirá hacer llamadas a la API
-        service = build("calendar", "v3", credentials=creds)
-        print("✅ Servicio de Google Calendar inicializado correctamente.")
+        service = build('calendar', 'v3', credentials=creds)
         return service
-    except HttpError as error:
-        print(f"Ocurrió un error al construir el servicio de Google: {error}")
+    except Exception as e:
+        print(f"❌ Error al crear el servicio de Google Calendar: {e}")
         return None
 
 def create_google_event(service, calendar_id, event_body, extended_properties=None):
@@ -112,108 +90,6 @@ def update_google_event(service, calendar_id, event_id, event_body):
     except HttpError as error:
         print(f"  ❌ Error al actualizar evento en Google Calendar: {error}")
         return None
-
-def create_and_share_calendar(service, filmmaker_name, filmmaker_email):
-    """
-    Crea un nuevo calendario de Google y lo comparte con el filmmaker especificado.
-    
-    Args:
-        service: Objeto de servicio de Google Calendar
-        filmmaker_name: Nombre del filmmaker para el título del calendario
-        filmmaker_email: Email del filmmaker para compartir el calendario
-    
-    Returns:
-        str: ID del calendario creado, o None si hubo error
-    """
-    try:
-        # Definir el cuerpo del nuevo calendario
-        calendar_body = {
-            'summary': f"{filmmaker_name} STUPENDASTIC",
-            'timeZone': 'Europe/Madrid'
-        }
-        
-        # Crear el calendario
-        print(f"  -> Creando calendario para {filmmaker_name}...")
-        created_calendar = service.calendars().insert(body=calendar_body).execute()
-        
-        # Obtener el ID del calendario recién creado
-        new_calendar_id = created_calendar.get('id')
-        
-        print(f"  ✅ Calendario creado para {filmmaker_name}.")
-        
-        # Definir la regla de compartición (ACL)
-        rule = {
-            'scope': {
-                'type': 'user',
-                'value': filmmaker_email
-            },
-            'role': 'writer'  # Permisos para añadir y modificar eventos
-        }
-        
-        # Aplicar la regla de compartición
-        print(f"  -> Compartiendo calendario con {filmmaker_email}...")
-        service.acl().insert(calendarId=new_calendar_id, body=rule).execute()
-        
-        print(f"  ↪️  Compartido con {filmmaker_email}.")
-        
-        return new_calendar_id
-        
-    except HttpError as error:
-        print(f"  ❌ Error al crear/compartir calendario para {filmmaker_name}: {error}")
-        return None
-
-
-def register_google_push_notification(service, calendar_id, webhook_url_base):
-    """
-    Registra un canal de notificación push con Google Calendar para un calendario específico.
-    
-    Args:
-        service: Objeto de servicio de Google Calendar
-        calendar_id: ID del calendario a monitorizar
-        webhook_url_base: URL base del webhook (ej: https://abc123.ngrok.io)
-        
-    Returns:
-        tuple: (bool, str) - (éxito, channel_id si exitoso)
-    """
-    import uuid
-    
-    try:
-        # Generar IDs únicos para el canal
-        channel_id = str(uuid.uuid4())
-        resource_id = str(uuid.uuid4())
-        
-        # Construir la URL completa del webhook
-        webhook_url = f"{webhook_url_base}/google-webhook"
-        
-        # Definir el cuerpo del canal de notificación
-        channel_body = {
-            'id': channel_id,
-            'type': 'web_hook',
-            'address': webhook_url,
-            'params': {
-                'ttl': '86400'  # Tiempo de vida en segundos (1 día)
-            }
-        }
-        
-        print(f"  -> Registrando canal de notificaciones para calendario {calendar_id}...")
-        print(f"     URL del webhook: {webhook_url}")
-        print(f"     ID del canal: {channel_id}")
-        
-        # Llamar a la API de Google Calendar para registrar el canal
-        response = service.events().watch(
-            calendarId=calendar_id, 
-            body=channel_body
-        ).execute()
-        
-        print(f"  ✅ Canal de notificaciones Google registrado para calendario {calendar_id}.")
-        print(f"     Resource ID: {response.get('resourceId', 'N/A')}")
-        print(f"     Expiración: {response.get('expiration', 'N/A')}")
-        
-        return True, channel_id
-        
-    except HttpError as error:
-        print(f"  ❌ Error al registrar canal de notificaciones para calendario {calendar_id}: {error}")
-        return False, None
 
 def update_google_event_by_id(service, calendar_id, event_id, event_body, extended_properties=None):
     """
@@ -308,3 +184,275 @@ def delete_event_by_id(service, calendar_id, event_id):
     except HttpError as error:
         print(f"  ❌ Error al eliminar evento {event_id}: {error}")
         return False
+
+def get_recently_updated_events(service, calendar_id, minutes_ago=5):
+    """
+    Obtiene los eventos que han sido actualizados recientemente en un calendario de Google.
+    Args:
+        service: Objeto de servicio de Google Calendar
+        calendar_id: ID del calendario donde buscar eventos
+        minutes_ago: Minutos hacia atrás desde la hora actual para buscar eventos (por defecto 5)
+    Returns:
+        list: Lista de eventos encontrados, o lista vacía si hay errores
+    """
+    try:
+        time_min = datetime.utcnow() - timedelta(minutes=minutes_ago)
+        time_min_iso = time_min.isoformat() + 'Z'
+        print(f"  -> Buscando eventos actualizados desde: {time_min_iso}")
+        response = service.events().list(
+            calendarId=calendar_id,
+            timeMin=time_min_iso,
+            showDeleted=True,
+            singleEvents=True
+        ).execute()
+        events = response.get('items', [])
+        print(f"  ✅ Encontrados {len(events)} eventos actualizados recientemente")
+        return events
+    except HttpError as error:
+        print(f"  ❌ Error al obtener eventos actualizados: {error}")
+        return []
+
+def get_incremental_sync_events(service, calendar_id, sync_token=None):
+    """
+    Obtiene eventos usando sincronización incremental con sync tokens.
+    Esta es la forma RECOMENDADA por Google para evitar bucles infinitos.
+    
+    Args:
+        service: Objeto de servicio de Google Calendar
+        calendar_id: ID del calendario
+        sync_token: Token de sincronización anterior (None para primera vez)
+    
+    Returns:
+        tuple: (events, next_sync_token) o (None, None) si hay error
+    """
+    try:
+        # Parámetros para sincronización incremental
+        params = {
+            'calendarId': calendar_id,
+            'showDeleted': True,
+            'singleEvents': True
+        }
+        
+        # Si tenemos sync_token, usarlo para obtener solo cambios
+        if sync_token:
+            params['syncToken'] = sync_token
+            print(f"  🔄 Sincronización incremental con sync token")
+        else:
+            # Primera vez: obtener todos los eventos
+            print(f"  🔄 Primera sincronización - obteniendo todos los eventos")
+        
+        response = service.events().list(**params).execute()
+        events = response.get('items', [])
+        next_sync_token = response.get('nextSyncToken')
+        
+        print(f"  ✅ Sincronización incremental: {len(events)} eventos, next_sync_token: {next_sync_token[:20] if next_sync_token else 'None'}")
+        
+        return events, next_sync_token
+        
+    except HttpError as error:
+        if error.resp.status == 410:
+            # Sync token expirado, necesitamos hacer una sincronización completa
+            print(f"  ⚠️  Sync token expirado, haciendo sincronización completa")
+            return get_incremental_sync_events(service, calendar_id, None)
+        else:
+            print(f"  ❌ Error en sincronización incremental: {error}")
+            return None, None
+
+def compare_event_values(event_google, item_monday):
+    """
+    Compara los valores de un evento de Google con un item de Monday.
+    Retorna True si hay diferencias que requieren sincronización.
+    
+    Args:
+        event_google: Evento de Google Calendar
+        item_monday: Item de Monday.com procesado
+    
+    Returns:
+        bool: True si hay diferencias, False si están sincronizados
+    """
+    try:
+        # Comparar título/nombre
+        google_title = event_google.get('summary', '')
+        monday_name = item_monday.get('nombre', '')
+        
+        if google_title != monday_name:
+            print(f"  📝 Diferencia en título: Google '{google_title}' vs Monday '{monday_name}'")
+            return True
+        
+        # Comparar fecha/hora
+        google_start = event_google.get('start', {})
+        monday_fecha = item_monday.get('fecha_inicio', '')
+        
+        if 'dateTime' in google_start:
+            google_datetime = google_start['dateTime']
+            # Normalizar formato de Google
+            if google_datetime.endswith('Z'):
+                google_datetime = google_datetime[:-1]
+            elif '+' in google_datetime:
+                google_datetime = google_datetime.split('+')[0]
+            
+            # Normalizar formato de Monday
+            if 'T' in monday_fecha:
+                if '+' in monday_fecha:
+                    monday_datetime = monday_fecha.split('+')[0]
+                else:
+                    monday_datetime = monday_fecha
+            else:
+                monday_datetime = f"{monday_fecha}T00:00:00"
+            
+            # Comparar con tolerancia de 1 minuto
+            try:
+                dt_google = datetime.fromisoformat(google_datetime)
+                dt_monday = datetime.fromisoformat(monday_datetime)
+                diferencia = abs((dt_google - dt_monday).total_seconds())
+                
+                if diferencia > 60:  # Más de 1 minuto de diferencia
+                    print(f"  🕐 Diferencia en fecha: Google '{google_datetime}' vs Monday '{monday_datetime}'")
+                    return True
+            except ValueError as e:
+                print(f"  ⚠️  Error comparando fechas: {e}")
+                return True
+        
+        # Si llegamos aquí, no hay diferencias significativas
+        print(f"  ✅ Evento sincronizado - no hay diferencias")
+        return False
+        
+    except Exception as e:
+        print(f"  ❌ Error comparando valores: {e}")
+        return True  # En caso de error, asumir que hay diferencias
+
+def create_and_share_calendar(service, filmmaker_name, filmmaker_email):
+    """
+    Crea un nuevo calendario de Google y lo comparte con el filmmaker especificado.
+    
+    Args:
+        service: Objeto de servicio de Google Calendar
+        filmmaker_name: Nombre del filmmaker para el título del calendario
+        filmmaker_email: Email del filmmaker para compartir el calendario
+    
+    Returns:
+        str: ID del calendario creado, o None si hubo error
+    """
+    try:
+        # Definir el cuerpo del nuevo calendario
+        calendar_body = {
+            'summary': f"{filmmaker_name} STUPENDASTIC",
+            'timeZone': 'Europe/Madrid'
+        }
+        
+        # Crear el calendario
+        print(f"  -> Creando calendario para {filmmaker_name}...")
+        created_calendar = service.calendars().insert(body=calendar_body).execute()
+        
+        # Obtener el ID del calendario recién creado
+        new_calendar_id = created_calendar.get('id')
+        
+        print(f"  ✅ Calendario creado para {filmmaker_name}.")
+        
+        # Definir la regla de compartición (ACL)
+        rule = {
+            'scope': {
+                'type': 'user',
+                'value': filmmaker_email
+            },
+            'role': 'writer'  # Permisos para añadir y modificar eventos
+        }
+        
+        # Aplicar la regla de compartición
+        print(f"  -> Compartiendo calendario con {filmmaker_email}...")
+        service.acl().insert(calendarId=new_calendar_id, body=rule).execute()
+        
+        print(f"  ↪️  Compartido con {filmmaker_email}.")
+        
+        return new_calendar_id
+        
+    except HttpError as error:
+        print(f"  ❌ Error al crear/compartir calendario para {filmmaker_name}: {error}")
+        return None
+
+def sync_event_to_multiple_calendars_optimized(service, master_event, target_calendars, master_calendar_id):
+    """
+    Sincronización INSTANTÁNEA y OPTIMIZADA de un evento a múltiples calendarios.
+    Usa operaciones paralelas para máxima velocidad.
+    
+    Args:
+        service: Servicio de Google Calendar
+        master_event: Evento maestro desde el cual sincronizar
+        target_calendars: Lista de calendar_ids donde sincronizar
+        master_calendar_id: ID del calendario maestro
+    
+    Returns:
+        dict: Resultados de sincronización {calendar_id: success}
+    """
+    import concurrent.futures
+    import threading
+    
+    print(f"⚡ SINCRONIZACIÓN INSTANTÁNEA a {len(target_calendars)} calendarios")
+    
+    results = {}
+    master_event_id = master_event.get('id')
+    event_summary = master_event.get('summary', 'Sin título')
+    
+    def sync_to_single_calendar(calendar_id):
+        """Sincronizar a un solo calendario - función interna para threading"""
+        try:
+            print(f"  🔄 Sincronizando '{event_summary}' → {calendar_id[:20]}...")
+            
+            # Buscar si ya existe una copia del evento
+            existing_copy = find_event_copy_by_master_id(service, calendar_id, master_event_id)
+            
+            # Preparar el cuerpo del evento (sin el ID para evitar conflictos)
+            event_body = {
+                'summary': master_event.get('summary'),
+                'description': master_event.get('description', ''),
+                'start': master_event.get('start'),
+                'end': master_event.get('end'),
+                'location': master_event.get('location', ''),
+                'extendedProperties': {
+                    'private': {
+                        'masterEventId': master_event_id,
+                        'masterCalendarId': master_calendar_id,
+                        'syncVersion': str(int(time.time()))  # Versión de sincronización
+                    }
+                }
+            }
+            
+            if existing_copy:
+                # Actualizar evento existente
+                copy_id = existing_copy.get('id')
+                updated_id = update_google_event_by_id(
+                    service, calendar_id, copy_id, event_body
+                )
+                success = updated_id is not None
+                print(f"    ✅ Actualizado en {calendar_id[:20]}" if success else f"    ❌ Error actualizando en {calendar_id[:20]}")
+            else:
+                # Crear nuevo evento
+                created_id = create_google_event(
+                    service, calendar_id, event_body
+                )
+                success = created_id is not None
+                print(f"    ✅ Creado en {calendar_id[:20]}" if success else f"    ❌ Error creando en {calendar_id[:20]}")
+            
+            return calendar_id, success
+            
+        except Exception as e:
+            print(f"    ❌ Error sincronizando a {calendar_id[:20]}: {e}")
+            return calendar_id, False
+    
+    # Ejecutar sincronización en paralelo para máxima velocidad
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(target_calendars), 5)) as executor:
+        # Enviar todos los trabajos
+        future_to_calendar = {
+            executor.submit(sync_to_single_calendar, calendar_id): calendar_id 
+            for calendar_id in target_calendars
+        }
+        
+        # Recoger resultados conforme se completan
+        for future in concurrent.futures.as_completed(future_to_calendar):
+            calendar_id, success = future.result()
+            results[calendar_id] = success
+    
+    successful_syncs = sum(1 for success in results.values() if success)
+    print(f"⚡ SINCRONIZACIÓN INSTANTÁNEA COMPLETADA: {successful_syncs}/{len(target_calendars)} exitosas")
+    
+    return results

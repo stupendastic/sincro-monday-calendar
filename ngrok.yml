@@ -1,0 +1,10 @@
+version: "2"
+authtoken: YOUR_AUTH_TOKEN_HERE
+tunnels:
+  stupendastic-sync:
+    proto: http
+    addr: 6754
+    inspect: true
+    bind_tls: true
+    allow_host_header: true
+    allow_custom_host: true

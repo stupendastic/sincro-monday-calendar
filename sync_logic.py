@@ -1,12 +1,76 @@
 import json
 import requests
 import os
+import uuid
+import time
 from datetime import datetime, timedelta
 
 # Importaciones de nuestros módulos
 import config
 from google_calendar_service import get_calendar_service, create_google_event, update_google_event, update_google_event_by_id, create_and_share_calendar, find_event_copy_by_master_id, delete_event_by_id
 from monday_api_handler import MondayAPIHandler
+
+def generar_uuid_cambio():
+    """Genera un UUID único para identificar un cambio específico"""
+    return str(uuid.uuid4())
+
+def registrar_cambio_reciente(item_id, change_uuid, timestamp=None):
+    """Registra un cambio reciente con su UUID único"""
+    if timestamp is None:
+        timestamp = time.time()
+    
+    if not hasattr(config, 'RECENT_CHANGES'):
+        config.RECENT_CHANGES = {}
+    
+    if item_id not in config.RECENT_CHANGES:
+        config.RECENT_CHANGES[item_id] = {}
+    
+    config.RECENT_CHANGES[item_id][change_uuid] = timestamp
+    print(f"🆔 Registrado cambio {change_uuid[:8]}... para item {item_id}")
+
+def es_cambio_reciente(item_id, change_uuid, window_seconds=30):
+    """Verifica si un cambio específico ya fue procesado recientemente"""
+    if not hasattr(config, 'RECENT_CHANGES'):
+        return False
+    
+    if item_id not in config.RECENT_CHANGES:
+        return False
+    
+    if change_uuid not in config.RECENT_CHANGES[item_id]:
+        return False
+    
+    timestamp = config.RECENT_CHANGES[item_id][change_uuid]
+    current_time = time.time()
+    
+    # Si el cambio es muy reciente, lo consideramos duplicado
+    if current_time - timestamp < window_seconds:
+        print(f"⚠️  Cambio {change_uuid[:8]}... procesado recientemente. Saltando...")
+        return True
+    
+    return False
+
+def limpiar_cambios_antiguos(window_seconds=300):
+    """Limpia cambios antiguos del registro"""
+    if not hasattr(config, 'RECENT_CHANGES'):
+        return
+    
+    current_time = time.time()
+    items_to_remove = []
+    
+    for item_id, changes in config.RECENT_CHANGES.items():
+        changes_to_remove = []
+        for change_uuid, timestamp in changes.items():
+            if current_time - timestamp > window_seconds:
+                changes_to_remove.append(change_uuid)
+        
+        for change_uuid in changes_to_remove:
+            del changes[change_uuid]
+        
+        if not changes:
+            items_to_remove.append(item_id)
+    
+    for item_id in items_to_remove:
+        del config.RECENT_CHANGES[item_id]
 
 def inicializar_y_preparar_entorno():
     """
@@ -35,6 +99,11 @@ def inicializar_y_preparar_entorno():
     
     # Variables para rastrear cambios
     config_changed = False
+    
+    # Diccionario para rastrear cambios recientes con UUIDs únicos
+    # {item_id: {change_uuid: timestamp}}
+    if not hasattr(config, 'RECENT_CHANGES'):
+        config.RECENT_CHANGES = {}
     
     # 2. Verificar y Crear Calendarios de Filmmakers
     print("\n🎬 VERIFICANDO CALENDARIOS DE FILMMAKERS")
@@ -252,24 +321,32 @@ def estan_sincronizados(item_procesado, evento_google):
             fecha_hora_google = start['dateTime']
             print(f"🕐 Comparando evento con hora: Monday '{fecha_monday}' vs Google '{fecha_hora_google}'")
             
-            # Normalizar formato de Google (remover 'Z' si existe)
+            # Normalizar formato de Google (convertir a UTC si es necesario)
             if fecha_hora_google.endswith('Z'):
-                fecha_hora_google = fecha_hora_google[:-1] + '+00:00'
+                # Google en UTC, convertir a string sin Z
+                fecha_hora_google = fecha_hora_google[:-1]
+            elif '+' in fecha_hora_google:
+                # Google con zona horaria, extraer solo la parte sin zona horaria
+                fecha_hora_google = fecha_hora_google.split('+')[0]
             
             # Normalizar formato de Monday si es necesario
             if 'T' in fecha_monday:
-                # Monday ya tiene formato ISO
-                fecha_monday_normalizada = fecha_monday
+                # Monday ya tiene formato ISO, extraer solo la parte sin zona horaria
+                if '+' in fecha_monday:
+                    fecha_monday_normalizada = fecha_monday.split('+')[0]
+                else:
+                    fecha_monday_normalizada = fecha_monday
             else:
                 # Monday solo tiene fecha, agregar hora por defecto
                 fecha_monday_normalizada = f"{fecha_monday}T00:00:00"
             
-            # Comparar fechas normalizadas
+            # Comparar fechas normalizadas (sin zonas horarias)
             try:
+                # Parsear fechas sin zonas horarias para comparación directa
                 dt_monday = datetime.fromisoformat(fecha_monday_normalizada)
                 dt_google = datetime.fromisoformat(fecha_hora_google)
                 
-                # Comparar con tolerancia de 1 minuto para manejar diferencias de zona horaria
+                # Comparar con tolerancia de 1 minuto para manejar pequeñas diferencias
                 diferencia = abs((dt_monday - dt_google).total_seconds())
                 return diferencia <= 60  # 1 minuto de tolerancia
                 
@@ -613,8 +690,15 @@ def sincronizar_item_especifico(item_id, monday_handler, google_service):
         print(f"📋 Item {item_id} no tiene operario asignado. Procesando como evento sin asignar...")
         
         # Lógica de upsert para eventos sin asignar
-        calendar_id = config.UNASSIGNED_CALENDAR_ID
+        # Si ya tiene un Google Event ID, usar el calendario maestro
+        # Si no tiene, usar el calendario de eventos sin asignar
         google_event_id = item_procesado.get('google_event_id')
+        if google_event_id:
+            # Si ya existe un evento, debe estar en el calendario maestro
+            calendar_id = config.MASTER_CALENDAR_ID
+        else:
+            # Si es nuevo, crear en el calendario de eventos sin asignar
+            calendar_id = config.UNASSIGNED_CALENDAR_ID
         
         print(f"Procesando '{item_procesado['name']}' como evento sin asignar...")
         
@@ -704,7 +788,15 @@ def sincronizar_item_especifico(item_id, monday_handler, google_service):
         print(f"-> [INFO] Item '{item_procesado['name']}' ya tiene evento maestro. Actualizando...")
         # Adaptar datos de Monday a formato de Google
         event_body = _adaptar_item_monday_a_evento_google(item_procesado, config.BOARD_ID_GRABACIONES)
-        success = update_google_event(google_service, calendar_id, google_event_id, event_body)
+        
+        # Mantener las extended_properties existentes o crear nuevas si no existen
+        extended_props = {
+            'private': {
+                'master_event_id': google_event_id
+            }
+        }
+        
+        success = update_google_event_by_id(google_service, calendar_id, google_event_id, event_body, extended_properties=extended_props)
         if success:
             print(f"✅ Evento maestro actualizado exitosamente para '{item_procesado['name']}'")
             master_event_created = True
@@ -717,7 +809,24 @@ def sincronizar_item_especifico(item_id, monday_handler, google_service):
         print(f"-> [INFO] Item '{item_procesado['name']}' es nuevo. Creando evento maestro...")
         # Adaptar datos de Monday a formato de Google
         event_body = _adaptar_item_monday_a_evento_google(item_procesado, config.BOARD_ID_GRABACIONES)
-        new_event_id = create_google_event(google_service, calendar_id, event_body)
+        
+        # Crear extended_properties para el evento maestro (se referenciará a sí mismo)
+        # Primero creamos el evento sin extended_properties para obtener su ID
+        temp_event_id = create_google_event(google_service, calendar_id, event_body)
+        
+        if temp_event_id:
+            # Ahora actualizamos el evento con las extended_properties que incluyen su propio ID
+            extended_props = {
+                'private': {
+                    'master_event_id': temp_event_id
+                }
+            }
+            
+            # Actualizar el evento con las propiedades extendidas
+            updated_event_id = update_google_event_by_id(google_service, calendar_id, temp_event_id, event_body, extended_properties=extended_props)
+            new_event_id = updated_event_id if updated_event_id else temp_event_id
+        else:
+            new_event_id = None
         
         if new_event_id:
             # Guardamos el ID del nuevo evento maestro en Monday
@@ -875,7 +984,7 @@ def sincronizar_item_especifico(item_id, monday_handler, google_service):
     print(f"✅ Limpieza de copias obsoletas completada para '{item_procesado['name']}'")
     return True
 
-def sincronizar_item_via_webhook(item_id, monday_handler, google_service=None):
+def sincronizar_item_via_webhook(item_id, monday_handler, google_service=None, change_uuid: str = None):
     """
     Sincroniza un item específico de Monday.com con Google Calendar - VERSIÓN OPTIMIZADA PARA WEBHOOKS.
     
@@ -886,12 +995,29 @@ def sincronizar_item_via_webhook(item_id, monday_handler, google_service=None):
         item_id (int): ID del item de Monday.com a sincronizar
         monday_handler: Instancia de MondayAPIHandler ya inicializada
         google_service: Instancia del servicio de Google Calendar ya inicializada (opcional)
+        change_uuid (str): UUID único del cambio (opcional)
         
     Returns:
         bool: True si la sincronización fue exitosa, False en caso contrario
     """
+    # Generar UUID si no se proporciona
+    if change_uuid is None:
+        change_uuid = generar_uuid_cambio()
+    
+    # Verificar si este cambio ya fue procesado
+    if es_cambio_reciente(item_id, change_uuid):
+        print(f"⚠️  Cambio {change_uuid[:8]}... ya procesado recientemente. Saltando...")
+        return True  # Consideramos éxito para evitar reintentos
+    
+    # Registrar este cambio
+    registrar_cambio_reciente(item_id, change_uuid)
+    
     print(f"⚡ INICIANDO SINCRONIZACIÓN WEBHOOK - Item {item_id}")
     print("=" * 50)
+    print(f"🆔 UUID del cambio: {change_uuid}")
+    
+    # Limpiar cambios antiguos
+    limpiar_cambios_antiguos()
     
     # 1. Verificar que los servicios están disponibles
     print("📡 Verificando servicios...")
@@ -1001,8 +1127,15 @@ def sincronizar_item_via_webhook(item_id, monday_handler, google_service=None):
     if not operario_ids:
         print(f"📋 Item {item_id} no tiene operario asignado. Procesando como evento sin asignar...")
         
-        calendar_id = config.UNASSIGNED_CALENDAR_ID
+        # Si ya tiene un Google Event ID, usar el calendario maestro
+        # Si no tiene, usar el calendario de eventos sin asignar
         google_event_id = item_procesado.get('google_event_id')
+        if google_event_id:
+            # Si ya existe un evento, debe estar en el calendario maestro
+            calendar_id = config.MASTER_CALENDAR_ID
+        else:
+            # Si es nuevo, crear en el calendario de eventos sin asignar
+            calendar_id = config.UNASSIGNED_CALENDAR_ID
         
         if google_event_id:
             print(f"-> [INFO] Item '{item_procesado['name']}' ya tiene evento. Actualizando...")
@@ -1311,7 +1444,7 @@ def _actualizar_fecha_en_monday(google_event_id, nueva_fecha_inicio, nueva_fecha
         return False
 
 
-def sincronizar_desde_google(master_event_id, monday_handler, google_service=None):
+def sincronizar_desde_google(master_event_id, monday_handler, google_service=None, change_uuid: str = None):
     """
     Sincroniza cambios desde Google Calendar hacia Monday.com y propaga a todas las copias.
     
@@ -1324,13 +1457,30 @@ def sincronizar_desde_google(master_event_id, monday_handler, google_service=Non
         master_event_id (str): ID del evento maestro en Google Calendar
         monday_handler: Instancia de MondayAPIHandler ya inicializada
         google_service: Instancia del servicio de Google Calendar ya inicializada (opcional)
+        change_uuid (str): UUID único del cambio (opcional)
         
     Returns:
         bool: True si la sincronización fue exitosa, False en caso contrario
     """
+    # Generar UUID si no se proporciona
+    if change_uuid is None:
+        change_uuid = generar_uuid_cambio()
+    
+    # Verificar si este cambio ya fue procesado
+    if es_cambio_reciente(master_event_id, change_uuid):
+        print(f"⚠️  Cambio {change_uuid[:8]}... ya procesado recientemente. Saltando...")
+        return True  # Consideramos éxito para evitar reintentos
+    
+    # Registrar este cambio
+    registrar_cambio_reciente(master_event_id, change_uuid)
+    
     print(f"🔄 INICIANDO SINCRONIZACIÓN DESDE GOOGLE")
     print(f"📋 Evento maestro: {master_event_id}")
     print("=" * 60)
+    print(f"🆔 UUID del cambio: {change_uuid}")
+    
+    # Limpiar cambios antiguos
+    limpiar_cambios_antiguos()
     
     # Verificar que los servicios están disponibles
     if not google_service:
@@ -1382,12 +1532,35 @@ def sincronizar_desde_google(master_event_id, monday_handler, google_service=Non
         print(f"✅ Fecha actualizada exitosamente en Monday.com")
         
         # Obtener el item_id de Monday para el siguiente paso
-        item_id = _obtener_item_id_por_google_event_id(master_event_id, monday_handler)
+        # FAST-PATH: intentar por nombre exacto primero (evita escanear todo el tablero)
+        nombre_evento = master_event.get('summary') or ''
+        item_id = _obtener_item_id_por_nombre(nombre_evento, monday_handler)
+        if not item_id:
+            # Fallback al método por Google Event ID
+            item_id = _obtener_item_id_por_google_event_id(master_event_id, monday_handler)
         if not item_id:
             print(f"❌ No se pudo obtener el item_id de Monday")
             return False
         
         print(f"✅ Item ID de Monday obtenido: {item_id}")
+        
+        # ========================================
+        # 🤖 DETECCIÓN DE AUTOMATIZACIÓN (ANTI-BUCLES)
+        # ========================================
+        print("\n🛡️ VERIFICANDO ORIGEN DEL CAMBIO...")
+        print("-" * 40)
+        
+        es_automatizacion = _detectar_cambio_de_automatizacion(item_id, monday_handler)
+        
+        if es_automatizacion:
+            print(f"🤖 ¡CAMBIO DE AUTOMATIZACIÓN DETECTADO!")
+            print(f"🛑 El último cambio fue hecho por la cuenta de automatización ({config.AUTOMATION_USER_NAME})")
+            print(f"🔄 Esto significa que el cambio vino del sistema, no de un usuario real")
+            print(f"✋ FRENANDO SINCRONIZACIÓN para evitar bucle infinito")
+            return True  # Retornamos éxito pero NO sincronizamos
+        else:
+            print(f"👤 Cambio detectado de USUARIO REAL")
+            print(f"✅ Continuando con sincronización normal...")
         
         # ========================================
         # 3. PROPAGAR LA VERDAD A LAS COPIAS
@@ -1642,10 +1815,10 @@ def update_monday_date_column_v2(item_id, board_id, column_id, date_value, time_
         print(f"❌ ERROR al escribir fecha en Monday: {e}")
         return False 
 
-def _obtener_item_id_por_google_event_id(google_event_id, monday_handler):
+def _obtener_item_id_por_google_event_id_mejorado(google_event_id, monday_handler):
     """
     Obtiene el item_id de Monday.com usando el Google Event ID.
-    Versión robusta con limpieza de datos y logging detallado.
+    Versión optimizada que usa búsqueda eficiente con límites.
     
     Args:
         google_event_id (str): ID del evento de Google Calendar
@@ -1657,93 +1830,259 @@ def _obtener_item_id_por_google_event_id(google_event_id, monday_handler):
     # 1. LIMPIAR EL GOOGLE_EVENT_ID
     cleaned_event_id = google_event_id.strip().replace('"', '').replace("'", "")
     print(f"🔍 Buscando item en Monday con Google Event ID: '{cleaned_event_id}'")
-    print(f"   ID original: '{google_event_id}'")
-    print(f"   ID limpio: '{cleaned_event_id}'")
-    
-    # 2. CONSULTA ROBUSTA USANDO items específicos por ID
-    # Primero intentamos buscar el item específico por su ID
-    query = f"""
-    query {{
-        items(ids: [9733398727]) {{
-            id
-            name
-            column_values(ids: ["{config.COL_GOOGLE_EVENT_ID}"]) {{
-                id
-                text
-                value
-            }}
-        }}
-    }}
-    """
-    
-    data = {'query': query}
-    
-    # 3. LOGGING DETALLADO DE LA CONSULTA
-    print(f"📋 Query GraphQL enviada a Monday:")
-    print(f"   {query}")
-    print(f"📋 Variables enviadas:")
-    print(f"   board_id: {config.BOARD_ID_GRABACIONES}")
-    print(f"   column_id: {config.COL_GOOGLE_EVENT_ID}")
-    print(f"   buscando_value: '{cleaned_event_id}'")
     
     try:
-        response = requests.post(url=monday_handler.API_URL, json=data, headers=monday_handler.HEADERS)
+        # 2. BÚSQUEDA EFICIENTE: Primero buscar en los últimos 100 items (más probable)
+        items = monday_handler.get_items(
+            board_id=str(config.BOARD_ID_GRABACIONES),
+            column_ids=[config.COL_GOOGLE_EVENT_ID],
+            limit_per_page=100  # Buscar solo en los últimos 100 items
+        )
         
-        # 4. LOGGING DE LA RESPUESTA
-        print(f"📡 Respuesta de Monday:")
-        print(f"   Status Code: {response.status_code}")
+        print(f"📊 Items en búsqueda inicial: {len(items)}")
         
-        if response.status_code != 200:
-            print(f"❌ Error HTTP: {response.status_code}")
-            print(f"   Response Text: {response.text}")
-            return None
-            
-        response_data = response.json()
-        
-        if 'errors' in response_data:
-            print(f"❌ Error GraphQL de Monday:")
-            for error in response_data['errors']:
-                print(f"   {error}")
-            return None
-        
-        # 5. PROCESAR RESULTADOS
-        items = response_data.get('data', {}).get('items', [])
-        print(f"📊 Items encontrados: {len(items)}")
-        
-        if not items:
-            print(f"❌ No se encontró ningún item en Monday con Google Event ID: '{cleaned_event_id}'")
-            print(f"   Board ID: {config.BOARD_ID_GRABACIONES}")
-            print(f"   Column ID: {config.COL_GOOGLE_EVENT_ID}")
-            return None
-        
-        # 6. VERIFICAR RESULTADOS
+        # 3. BUSCAR EN LOS ÚLTIMOS ITEMS (más probable que tengan Google Event ID)
         for item in items:
             item_id = item.get('id')
             item_name = item.get('name')
             column_values = item.get('column_values', [])
             
-            print(f"🔍 Verificando item: '{item_name}' (ID: {item_id})")
-            
             for col in column_values:
                 if col.get('id') == config.COL_GOOGLE_EVENT_ID:
                     text_value = col.get('text', '').strip()
-                    print(f"   Columna {config.COL_GOOGLE_EVENT_ID}: '{text_value}'")
-                    
                     if text_value == cleaned_event_id:
-                        print(f"✅ ¡MATCH ENCONTRADO! Item: '{item_name}' (ID: {item_id})")
+                        print(f"✅ Item encontrado en búsqueda inicial: '{item_name}' (ID: {item_id})")
                         return item_id
-                    else:
-                        print(f"   ❌ No coincide: '{text_value}' != '{cleaned_event_id}'")
         
-        print(f"❌ No se encontró ningún item con el Google Event ID exacto: '{cleaned_event_id}'")
+        # 4. SI NO SE ENCUENTRA, BUSCAR EN ITEMS MÁS ANTIGUOS (paginación)
+        print(f"🔍 Item no encontrado en búsqueda inicial. Buscando en items más antiguos...")
+        
+        # Obtener más items (hasta 500 total)
+        all_items = items
+        page_count = 0
+        max_pages = 5  # Máximo 5 páginas para evitar búsquedas infinitas
+        
+        while len(all_items) < 500 and page_count < max_pages:
+            page_count += 1
+            print(f"📄 Buscando en página {page_count}...")
+            
+            # Obtener siguiente página
+            next_items = monday_handler.get_items(
+                board_id=str(config.BOARD_ID_GRABACIONES),
+                column_ids=[config.COL_GOOGLE_EVENT_ID],
+                limit_per_page=100
+            )
+            
+            if not next_items or len(next_items) == 0:
+                break
+                
+            all_items.extend(next_items)
+            
+            # Buscar en esta página
+            for item in next_items:
+                item_id = item.get('id')
+                item_name = item.get('name')
+                column_values = item.get('column_values', [])
+                
+                for col in column_values:
+                    if col.get('id') == config.COL_GOOGLE_EVENT_ID:
+                        text_value = col.get('text', '').strip()
+                        if text_value == cleaned_event_id:
+                            print(f"✅ Item encontrado en página {page_count}: '{item_name}' (ID: {item_id})")
+                            return item_id
+        
+        print(f"❌ No se encontró ningún item con Google Event ID: '{cleaned_event_id}' después de buscar en {len(all_items)} items")
         return None
         
     except Exception as e:
-        print(f"❌ Error inesperado al obtener item_id:")
-        print(f"   Exception: {type(e).__name__}: {e}")
-        print(f"   Query enviada: {query}")
-        print(f"   Variables: board_id={config.BOARD_ID_GRABACIONES}, column_id={config.COL_GOOGLE_EVENT_ID}, buscando_value='{cleaned_event_id}'")
+        print(f"❌ Error al obtener item_id usando MondayAPIHandler: {e}")
         return None
+
+def _obtener_item_id_por_google_event_id_optimizado(google_event_id, monday_handler):
+    """
+    Versión SÚPER OPTIMIZADA para buscar item_id por Google Event ID.
+    Usa búsqueda limitada y eficiente.
+    """
+    print(f"⚡ Búsqueda SÚPER OPTIMIZADA: '{google_event_id}'")
+    
+    try:
+        # BÚSQUEDA LIMITADA Y EFICIENTE
+        # Buscar solo en los últimos 100 items (más probable que tengan Google Event ID)
+        query = f"""
+        query {{
+            boards(ids: [{config.BOARD_ID_GRABACIONES}]) {{
+                items_page(limit: 100) {{
+                    items {{
+                        id
+                        name
+                        column_values(ids: ["{config.COL_GOOGLE_EVENT_ID}"]) {{
+                            id
+                            text
+                        }}
+                    }}
+                }}
+            }}
+        }}
+        """
+        
+        response = monday_handler._make_request(query)
+        
+        if response and 'data' in response:
+            boards = response['data'].get('boards', [])
+            if boards:
+                items_page = boards[0].get('items_page', {})
+                items = items_page.get('items', [])
+                
+                print(f"📊 Buscando en {len(items)} items recientes")
+                
+                # Buscar el item con el Google Event ID específico
+                for item in items:
+                    item_id = item.get('id')
+                    item_name = item.get('name', 'Sin nombre')
+                    column_values = item.get('column_values', [])
+                    
+                    for column in column_values:
+                        if column.get('id') == config.COL_GOOGLE_EVENT_ID:
+                            stored_event_id = column.get('text', '').strip()
+                            if stored_event_id == google_event_id:
+                                print(f"✅ Item encontrado SÚPER RÁPIDO: '{item_name}' (ID: {item_id})")
+                                return item_id
+        
+        print(f"❌ No se encontró item con Google Event ID: '{google_event_id}' en items recientes")
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error en búsqueda optimizada: {e}")
+        # Fallback a búsqueda por nombre si la búsqueda directa falla
+        print("🔄 Usando fallback por nombre...")
+        return _buscar_por_nombre_fallback(google_event_id, monday_handler)
+
+def _buscar_por_nombre_fallback(google_event_id, monday_handler):
+    """
+    Fallback: buscar por nombre del evento en Google Calendar
+    """
+    try:
+        # Obtener el evento de Google para obtener el nombre
+        google_service = get_calendar_service()
+        if not google_service:
+            return None
+        
+        # Buscar en el calendario maestro
+        event = google_service.events().get(
+            calendarId=config.MASTER_CALENDAR_ID,
+            eventId=google_event_id
+        ).execute()
+        
+        event_name = event.get('summary', '')
+        if event_name:
+            print(f"🔍 Buscando por nombre del evento: '{event_name}'")
+            return _obtener_item_id_por_nombre(event_name, monday_handler)
+        
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error en fallback por nombre: {e}")
+        return None
+
+def _obtener_item_id_por_nombre(item_name, monday_handler):
+    """
+    Busca el item_id en Monday.com por nombre EXACTO usando una query paginada eficiente.
+    Devuelve el primer match exacto encontrado o None.
+    """
+    try:
+        if not item_name:
+            return None
+        # Usar el método del handler que ya implementa búsqueda por nombre con items_page
+        items = monday_handler.search_items_by_name(
+            board_id=str(config.BOARD_ID_GRABACIONES),
+            item_name=item_name,
+            exact_match=True
+        )
+        if items:
+            # Devolver el primer resultado
+            return items[0].id
+        return None
+    except Exception as e:
+        print(f"❌ Error buscando por nombre '{item_name}': {e}")
+        return None
+
+def _detectar_cambio_de_automatizacion(item_id, monday_handler):
+    """
+    Detecta si el último cambio en un item fue hecho por la cuenta de automatización.
+    
+    Args:
+        item_id (str): ID del item de Monday
+        monday_handler: Instancia de MondayAPIHandler
+        
+    Returns:
+        bool: True si el último cambio fue hecho por automatización
+    """
+    try:
+        # Obtener actualizaciones recientes del item
+        query = f"""
+        query {{
+            items(ids: [{item_id}]) {{
+                id
+                name
+                updates(limit: 5) {{
+                    id
+                    creator {{
+                        id
+                        name
+                    }}
+                    created_at
+                    body
+                }}
+            }}
+        }}
+        """
+        
+        response = monday_handler._make_request(query)
+        
+        if response and 'data' in response:
+            items = response['data'].get('items', [])
+            if items:
+                item = items[0]
+                updates = item.get('updates', [])
+                
+                if updates:
+                    # Revisar las últimas actualizaciones
+                    for update in updates[:3]:  # Solo las 3 más recientes
+                        creator = update.get('creator', {})
+                        creator_id = creator.get('id')
+                        creator_name = creator.get('name', '')
+                        created_at = update.get('created_at')
+                        body = update.get('body', '')
+                        
+                        print(f"📝 Update: {creator_name} ({creator_id}) - {created_at}")
+                        print(f"   Contenido: {body[:100]}...")
+                        
+                        # Verificar si fue tu cuenta (automatización)
+                        if str(creator_id) == str(config.AUTOMATION_USER_ID):
+                            print(f"🤖 ¡Detectado cambio de AUTOMATIZACIÓN! Usuario: {creator_name}")
+                            return True
+                        
+                        # También verificar por nombre como fallback
+                        if creator_name == config.AUTOMATION_USER_NAME:
+                            print(f"🤖 ¡Detectado cambio de AUTOMATIZACIÓN por nombre! Usuario: {creator_name}")
+                            return True
+                
+                print("👤 Último cambio fue de usuario REAL, no automatización")
+                return False
+        
+        print("⚠️ No se pudieron obtener actualizaciones del item")
+        return False
+        
+    except Exception as e:
+        print(f"❌ Error detectando automatización: {e}")
+        return False
+
+def _obtener_item_id_por_google_event_id(google_event_id, monday_handler):
+    """
+    Wrapper para mantener compatibilidad con código existente.
+    Usa la versión optimizada por defecto.
+    """
+    return _obtener_item_id_por_google_event_id_optimizado(google_event_id, monday_handler)
 
 def _adaptar_item_monday_a_evento_google(item_procesado, board_id=None):
     """
@@ -1885,3 +2224,365 @@ def _obtener_operarios_actuales(item_id, monday_handler):
     except Exception as e:
         print(f"❌ Error al obtener operarios actuales: {e}")
         return set() 
+
+def sincronizar_desde_google_calendar(evento_cambiado, google_service, monday_handler, change_uuid: str = None):
+    """
+    Sincroniza cambios desde Google Calendar a Monday.com y propaga a calendarios personales.
+    
+    Args:
+        evento_cambiado (dict): Evento de Google Calendar que ha cambiado
+        google_service: Servicio de Google Calendar
+        monday_handler: Instancia de MondayAPIHandler
+        change_uuid (str): UUID único del cambio (opcional)
+        
+    Returns:
+        bool: True si la sincronización fue exitosa
+    """
+    # Generar UUID si no se proporciona
+    if change_uuid is None:
+        change_uuid = generar_uuid_cambio()
+    
+    # Verificar si este cambio ya fue procesado
+    event_id = evento_cambiado.get('id')
+    if es_cambio_reciente(event_id, change_uuid):
+        print(f"⚠️  Cambio {change_uuid[:8]}... ya procesado recientemente. Saltando...")
+        return True  # Consideramos éxito para evitar reintentos
+    
+    # Registrar este cambio
+    registrar_cambio_reciente(event_id, change_uuid)
+    
+    print(f"\n🔄 SINCRONIZANDO DESDE GOOGLE CALENDAR")
+    print("=" * 50)
+    print(f"🆔 UUID del cambio: {change_uuid}")
+    
+    # Limpiar cambios antiguos
+    limpiar_cambios_antiguos()
+    
+    try:
+        # 1. Extraer información del evento
+        event_id = evento_cambiado.get('id')
+        event_summary = evento_cambiado.get('summary', 'Sin título')
+        
+        print(f"📋 Evento: {event_summary} (ID: {event_id})")
+        
+        # 2. Buscar el item de Monday correspondiente
+        item_id = None
+        
+        # Fast-path: buscar por nombre
+        if event_summary:
+            print(f"🔍 Buscando por nombre: '{event_summary}'")
+            try:
+                items_by_name = monday_handler.search_items_by_name(
+                    board_id=str(config.BOARD_ID_GRABACIONES),
+                    item_name=event_summary,
+                    exact_match=True
+                )
+                if items_by_name:
+                    item_id = items_by_name[0].id
+                    print(f"✅ Encontrado por nombre: {item_id}")
+            except Exception as e:
+                print(f"⚠️ Error buscando por nombre: {e}")
+        
+        # Fallback: buscar por Google Event ID
+        if not item_id:
+            print(f"🔍 Buscando por Google Event ID: {event_id}")
+            item_id = _obtener_item_id_por_google_event_id(event_id, monday_handler)
+        
+        if not item_id:
+            print(f"❌ No se pudo encontrar el item de Monday correspondiente")
+            return False
+        
+        print(f"✅ Item de Monday encontrado: {item_id}")
+        
+        # 3. Extraer nueva fecha/hora del evento de Google
+        start = evento_cambiado.get('start', {})
+        end = evento_cambiado.get('end', {})
+        
+        if 'dateTime' in start:
+            # Evento con hora específica
+            fecha_inicio = start['dateTime']
+            fecha_fin = end.get('dateTime', fecha_inicio)
+            
+            # Convertir a formato de Monday
+            from datetime import datetime
+            dt_inicio = datetime.fromisoformat(fecha_inicio.replace('Z', '+00:00'))
+            
+            fecha_monday = dt_inicio.strftime('%Y-%m-%d')
+            hora_monday = dt_inicio.strftime('%H:%M:%S')
+            
+            print(f"📅 Nueva fecha: {fecha_monday} {hora_monday}")
+            
+        elif 'date' in start:
+            # Evento de día completo
+            fecha_monday = start['date']
+            hora_monday = None
+            
+            print(f"📅 Nueva fecha: {fecha_monday} (día completo)")
+        else:
+            print(f"❌ Formato de fecha no reconocido")
+            return False
+        
+        # 4. Actualizar Monday.com
+        print(f"🔄 Actualizando Monday.com...")
+        
+        success = update_monday_date_column_v2(
+            item_id=item_id,
+            board_id=str(config.BOARD_ID_GRABACIONES),
+            column_id=config.COL_FECHA,
+            date_value=fecha_monday,
+            time_value=hora_monday,
+            monday_handler=monday_handler
+        )
+        
+        if not success:
+            print(f"❌ Error actualizando Monday.com")
+            return False
+        
+        print(f"✅ Monday.com actualizado exitosamente")
+        
+        # 5. Propagar cambios a calendarios personales
+        print(f"🔄 Propagando cambios a calendarios personales...")
+        
+        # Obtener operarios actuales del item
+        operarios_actuales = _obtener_operarios_actuales(item_id, monday_handler)
+        print(f"👥 Operarios actuales: {operarios_actuales}")
+        
+        # Actualizar copias en calendarios personales
+        for profile in config.FILMMAKER_PROFILES:
+            if profile["monday_name"] in operarios_actuales:
+                calendar_id = profile["calendar_id"]
+                print(f"🔄 Actualizando copia para {profile['monday_name']}...")
+                
+                # Buscar la copia existente
+                copia_event_id = _buscar_evento_copia_por_master_id(event_id, calendar_id, google_service)
+                
+                if copia_event_id:
+                    # Actualizar la copia existente
+                    try:
+                        # Crear el cuerpo del evento actualizado
+                        event_body = {
+                            'summary': event_summary,
+                            'start': start,
+                            'end': end,
+                            'extendedProperties': {
+                                'private': {
+                                    'master_event_id': event_id,
+                                    'monday_item_id': str(item_id)
+                                }
+                            }
+                        }
+                        
+                        # Actualizar el evento
+                        updated_event = google_service.events().update(
+                            calendarId=calendar_id,
+                            eventId=copia_event_id,
+                            body=event_body
+                        ).execute()
+                        
+                        print(f"✅ Copia actualizada: {updated_event['id']}")
+                        
+                    except Exception as e:
+                        print(f"❌ Error actualizando copia: {e}")
+                else:
+                    print(f"⚠️ No se encontró copia para {profile['monday_name']}")
+        
+        print(f"✅ Sincronización desde Google Calendar completada")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error en sincronización desde Google Calendar: {e}")
+        return False
+
+def _buscar_evento_copia_por_master_id(master_event_id, calendar_id, google_service):
+    """
+    Busca un evento copia por su master_event_id en un calendario específico.
+    
+    Args:
+        master_event_id (str): ID del evento maestro
+        calendar_id (str): ID del calendario donde buscar
+        google_service: Servicio de Google Calendar
+        
+    Returns:
+        str: ID del evento copia si se encuentra, None en caso contrario
+    """
+    try:
+        # Buscar eventos en el calendario
+        events_result = google_service.events().list(
+            calendarId=calendar_id,
+            maxResults=100
+        ).execute()
+        
+        events = events_result.get('items', [])
+        
+        for event in events:
+            extended_props = event.get('extendedProperties', {})
+            private_props = extended_props.get('private', {})
+            
+            if private_props.get('master_event_id') == master_event_id:
+                return event['id']
+        
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error buscando evento copia: {e}")
+        return None
+
+def sincronizar_desde_calendario_personal(evento_cambiado, calendar_id, google_service, monday_handler):
+    """
+    Sincroniza cambios desde un calendario personal hacia el máster y Monday.com.
+    Solo funciona si el cambio fue hecho por la cuenta admin.
+    
+    Args:
+        evento_cambiado: Evento de Google Calendar que cambió
+        calendar_id: ID del calendario personal donde ocurrió el cambio
+        google_service: Servicio de Google Calendar
+        monday_handler: Handler de Monday.com
+    
+    Returns:
+        bool: True si la sincronización fue exitosa
+    """
+    print(f"\n🔄 SINCRONIZANDO DESDE CALENDARIO PERSONAL")
+    print("=" * 60)
+    
+    event_id = evento_cambiado.get('id')
+    event_summary = evento_cambiado.get('summary', 'Sin título')
+    
+    print(f"📋 Evento: {event_summary} (ID: {event_id})")
+    print(f"📅 Calendario personal: {calendar_id}")
+    
+    # 1. Verificar que es un evento copia (debe tener master_event_id)
+    extended_props = evento_cambiado.get('extendedProperties', {})
+    private_props = extended_props.get('private', {})
+    master_event_id = private_props.get('master_event_id')
+    
+    if not master_event_id:
+        print(f"❌ No es un evento copia (no tiene master_event_id)")
+        return False
+    
+    print(f"🎯 Evento maestro: {master_event_id}")
+    
+    # 2. Buscar el item de Monday.com usando el master_event_id
+    print(f"🔍 Buscando item de Monday con master_event_id: {master_event_id}")
+    
+    item_id = _obtener_item_id_por_google_event_id_optimizado(master_event_id, monday_handler)
+    
+    if not item_id:
+        print(f"❌ No se encontró el item de Monday correspondiente")
+        return False
+    
+    print(f"✅ Item de Monday encontrado: {item_id}")
+    
+    # 3. Extraer la nueva fecha del evento
+    start = evento_cambiado.get('start', {})
+    if 'dateTime' in start:
+        fecha_str = start['dateTime']
+        # Convertir a datetime para formatear
+        from datetime import datetime
+        fecha_dt = datetime.fromisoformat(fecha_str.replace('Z', '+00:00'))
+        fecha_formateada = fecha_dt.strftime('%Y-%m-%d')
+        hora_formateada = fecha_dt.strftime('%H:%M:%S')
+    elif 'date' in start:
+        fecha_formateada = start['date']
+        hora_formateada = None
+    else:
+        print(f"❌ No se pudo extraer la fecha del evento")
+        return False
+    
+    print(f"📅 Nueva fecha: {fecha_formateada} {hora_formateada if hora_formateada else ''}")
+    
+    # 4. Actualizar Monday.com
+    print(f"🔄 Actualizando Monday.com...")
+    try:
+        # Preparar el valor de la columna de fecha
+        if hora_formateada:
+            fecha_value = f"{fecha_formateada} {hora_formateada}"
+        else:
+            fecha_value = fecha_formateada
+        
+        # Actualizar la fecha en Monday.com
+        success = monday_handler.update_column_value(
+            board_id=str(config.BOARD_ID_GRABACIONES),
+            item_id=item_id,
+            column_id=config.COL_FECHA,
+            value=fecha_value,
+            column_type="date"
+        )
+        
+        if success:
+            print(f"✅ Monday.com actualizado exitosamente")
+        else:
+            print(f"❌ Error actualizando Monday.com")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error actualizando Monday.com: {e}")
+        return False
+    
+    # 5. Actualizar el evento maestro en Google Calendar
+    print(f"🔄 Actualizando evento maestro...")
+    try:
+        # Obtener el evento maestro actual
+        master_event = google_service.events().get(
+            calendarId=config.MASTER_CALENDAR_ID,
+            eventId=master_event_id
+        ).execute()
+        
+        # Actualizar la fecha del evento maestro
+        master_event['start'] = evento_cambiado['start']
+        master_event['end'] = evento_cambiado['end']
+        
+        # Actualizar el evento maestro
+        updated_master = google_service.events().update(
+            calendarId=config.MASTER_CALENDAR_ID,
+            eventId=master_event_id,
+            body=master_event
+        ).execute()
+        
+        print(f"✅ Evento maestro actualizado: {updated_master['id']}")
+        
+    except Exception as e:
+        print(f"❌ Error actualizando evento maestro: {e}")
+        return False
+    
+    # 6. Propagar el cambio a todos los otros calendarios personales
+    print(f"🔄 Propagando cambios a otros calendarios personales...")
+    
+    try:
+        # Obtener todos los perfiles de filmmakers
+        filmmaker_profiles = config.FILMMAKER_PROFILES
+        
+        for filmmaker_name, profile in filmmaker_profiles.items():
+            filmmaker_calendar = profile.get('calendar_id')
+            
+            # Saltar el calendario donde ocurrió el cambio original
+            if filmmaker_calendar == calendar_id:
+                continue
+            
+            print(f"  -> Actualizando copia para {filmmaker_name}...")
+            
+            # Buscar la copia en este calendario
+            copy_event = _buscar_evento_copia_por_master_id(master_event_id, filmmaker_calendar, google_service)
+            
+            if copy_event:
+                # Actualizar la copia existente
+                copy_event['start'] = evento_cambiado['start']
+                copy_event['end'] = evento_cambiado['end']
+                
+                updated_copy = google_service.events().update(
+                    calendarId=filmmaker_calendar,
+                    eventId=copy_event['id'],
+                    body=copy_event
+                ).execute()
+                
+                print(f"    ✅ Copia actualizada: {updated_copy['id']}")
+            else:
+                print(f"    ⚠️  No se encontró copia para {filmmaker_name}")
+        
+        print(f"✅ Propagación completada")
+        
+    except Exception as e:
+        print(f"❌ Error propagando cambios: {e}")
+        return False
+    
+    print(f"✅ Sincronización desde calendario personal completada")
+    return True

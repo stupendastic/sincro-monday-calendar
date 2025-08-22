@@ -711,12 +711,7 @@ class MondayAPIHandler:
                             text
                             type
                             ... on StatusValue {
-                                label {
-                                    id
-                                    text
-                                    color
-                                    index
-                                }
+                                label
                             }
                             ... on BoardRelationValue {
                                 linked_item_ids
