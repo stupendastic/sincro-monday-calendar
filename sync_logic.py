@@ -133,44 +133,65 @@ def parse_monday_item(item):
         return None
 
 
-def _get_personal_calendar_id_for_item(item_procesado):
-    """Obtiene el calendar_id personal según el operario del item.
+def _get_personal_calendar_ids_for_item(item_procesado):
+    """Obtiene los calendar_ids personales según los operarios del item.
 
+    Maneja múltiples operarios separados por comas.
     Busca por nombre de usuario de Monday en FILMMAKER_PROFILES (config.FILMMAKER_PROFILES).
-    Si no hay operario o no hay coincidencia, devuelve None.
+    Retorna una lista de calendar_ids.
     """
     try:
-        operario_nombre = item_procesado.get('operario')
-        print(f"🔍 Debug: Operario del item: '{operario_nombre}'")
+        operarios_texto = item_procesado.get('operario', '')
+        print(f"🔍 Debug: Operarios del item: '{operarios_texto}'")
         
-        if not operario_nombre:
-            print("❌ Debug: No hay operario asignado")
-            return None
+        if not operarios_texto:
+            print("❌ Debug: No hay operarios asignados")
+            return []
+
+        # Separar múltiples operarios (pueden estar separados por comas, punto y coma, etc.)
+        operarios_lista = []
+        if ',' in operarios_texto:
+            operarios_lista = [op.strip() for op in operarios_texto.split(',')]
+        elif ';' in operarios_texto:
+            operarios_lista = [op.strip() for op in operarios_texto.split(';')]
+        else:
+            operarios_lista = [operarios_texto.strip()]
+        
+        print(f"🔍 Debug: Operarios separados: {operarios_lista}")
 
         profiles = getattr(config, 'FILMMAKER_PROFILES', [])
         print(f"🔍 Debug: Buscando en {len(profiles)} perfiles disponibles")
         
-        # Limpiar el nombre del operario (quitar espacios extra, etc.)
-        operario_limpio = operario_nombre.strip() if operario_nombre else ""
+        calendar_ids = []
         
-        for profile in profiles:
-            monday_name = profile.get('monday_name', '').strip()
-            print(f"🔍 Debug: Comparando '{operario_limpio}' con '{monday_name}'")
+        for operario in operarios_lista:
+            operario_limpio = operario.strip()
+            encontrado = False
             
-            # Comparación exacta
-            if monday_name == operario_limpio:
-                calendar_id = profile.get('calendar_id')
-                if calendar_id:
-                    print(f"✅ Debug: Coincidencia encontrada! Calendar ID: {calendar_id}")
-                    return calendar_id
-                else:
-                    print(f"⚠️  Debug: Perfil encontrado pero sin calendar_id")
+            for profile in profiles:
+                monday_name = profile.get('monday_name', '').strip()
+                print(f"🔍 Debug: Comparando '{operario_limpio}' con '{monday_name}'")
+                
+                # Comparación exacta
+                if monday_name == operario_limpio:
+                    calendar_id = profile.get('calendar_id')
+                    if calendar_id:
+                        print(f"✅ Debug: Coincidencia encontrada para '{operario_limpio}': {calendar_id}")
+                        calendar_ids.append(calendar_id)
+                        encontrado = True
+                        break
+                    else:
+                        print(f"⚠️  Debug: Perfil encontrado pero sin calendar_id para '{operario_limpio}'")
+            
+            if not encontrado:
+                print(f"❌ Debug: No se encontró perfil para operario '{operario_limpio}'")
         
-        print("❌ Debug: No se encontró coincidencia en perfiles")
-        return None
+        print(f"✅ Debug: Calendar IDs encontrados: {calendar_ids}")
+        return calendar_ids
+        
     except Exception as e:
-        print(f"❌ Debug: Error en _get_personal_calendar_id_for_item: {e}")
-        return None
+        print(f"❌ Debug: Error en _get_personal_calendar_ids_for_item: {e}")
+        return []
 
 
 def _get_personal_calendar_id_by_name(operario_name):
@@ -192,65 +213,85 @@ def _get_personal_calendar_id_by_name(operario_name):
         return None
 
 
-def _handle_operario_change(google_service, monday_item_id, old_operario, new_operario):
-    """Maneja el cambio de operario moviendo el evento personal del calendario anterior al nuevo."""
+def _handle_operarios_change(google_service, monday_item_id, old_operarios, new_operarios):
+    """Maneja el cambio de operarios sincronizando eventos en calendarios personales."""
     try:
-        print(f"👤 Detectado cambio de operario: '{old_operario}' → '{new_operario}'")
+        print(f"👤 Detectado cambio de operarios: '{old_operarios}' → '{new_operarios}'")
         
-        # Obtener calendarios personal anterior y nuevo
-        old_calendar_id = _get_personal_calendar_id_by_name(old_operario)
-        new_calendar_id = _get_personal_calendar_id_by_name(new_operario)
+        # Obtener calendarios personales anteriores y nuevos
+        old_calendar_ids = _get_personal_calendar_ids_from_text(old_operarios)
+        new_calendar_ids = _get_personal_calendar_ids_from_text(new_operarios)
         
-        if not old_calendar_id:
-            print(f"ℹ️  No hay calendario personal configurado para operario anterior: {old_operario}")
-            return None
-            
-        if not new_calendar_id:
-            print(f"ℹ️  No hay calendario personal configurado para nuevo operario: {new_operario}")
-            return None
-            
-        if old_calendar_id == new_calendar_id:
-            print(f"ℹ️  Mismo calendar_id para ambos operarios, no es necesario mover")
-            return new_calendar_id
+        print(f"🔍 Calendarios anteriores: {old_calendar_ids}")
+        print(f"🔍 Calendarios nuevos: {new_calendar_ids}")
         
-        # Buscar el evento en el calendario anterior
-        print(f"🔍 Buscando evento personal en calendario anterior...")
+        # Eliminar eventos de calendarios que ya no corresponden
+        for old_calendar_id in old_calendar_ids:
+            if old_calendar_id not in new_calendar_ids:
+                print(f"🗑️  Eliminando evento del calendario que ya no corresponde: {old_calendar_id}")
+                _remove_event_from_calendar(google_service, old_calendar_id, monday_item_id)
+        
+        return new_calendar_ids
+        
+    except Exception as e:
+        print(f"⚠️  Error manejando cambio de operarios: {e}")
+        return []
+
+
+def _get_personal_calendar_ids_from_text(operarios_texto):
+    """Obtiene calendar_ids desde texto de operarios."""
+    if not operarios_texto:
+        return []
+    
+    # Separar múltiples operarios
+    operarios_lista = []
+    if ',' in operarios_texto:
+        operarios_lista = [op.strip() for op in operarios_texto.split(',')]
+    elif ';' in operarios_texto:
+        operarios_lista = [op.strip() for op in operarios_texto.split(';')]
+    else:
+        operarios_lista = [operarios_texto.strip()]
+    
+    calendar_ids = []
+    for operario in operarios_lista:
+        calendar_id = _get_personal_calendar_id_by_name(operario)
+        if calendar_id:
+            calendar_ids.append(calendar_id)
+    
+    return calendar_ids
+
+
+def _remove_event_from_calendar(google_service, calendar_id, monday_item_id):
+    """Elimina un evento específico de un calendario."""
+    try:
+        # Buscar el evento en el calendario
         events_result = google_service.events().list(
-            calendarId=old_calendar_id,
+            calendarId=calendar_id,
             maxResults=50,
             singleEvents=True
         ).execute()
         
         events = events_result.get('items', [])
-        old_event_id = None
-        event_to_move = None
         
         # Buscar el evento que tenga el mismo monday_item_id
         for event in events:
             extended_props = event.get('extendedProperties', {}).get('private', {})
             if extended_props.get('monday_item_id') == str(monday_item_id):
-                old_event_id = event.get('id')
-                event_to_move = event
-                print(f"🔍 Encontrado evento personal en calendario anterior: {old_event_id}")
-                break
+                event_id = event.get('id')
+                print(f"🗑️  Eliminando evento {event_id} del calendario {calendar_id}")
+                google_service.events().delete(
+                    calendarId=calendar_id,
+                    eventId=event_id
+                ).execute()
+                print(f"✅ Evento eliminado del calendario {calendar_id}")
+                return True
         
-        if not event_to_move:
-            print(f"ℹ️  No se encontró evento personal en calendario anterior")
-            return new_calendar_id
-        
-        # Eliminar del calendario anterior
-        print(f"🗑️  Eliminando evento del calendario anterior...")
-        google_service.events().delete(
-            calendarId=old_calendar_id,
-            eventId=old_event_id
-        ).execute()
-        print(f"✅ Evento eliminado del calendario anterior")
-        
-        return new_calendar_id
+        print(f"ℹ️  No se encontró evento para eliminar en calendario {calendar_id}")
+        return False
         
     except Exception as e:
-        print(f"⚠️  Error manejando cambio de operario: {e}")
-        return new_calendar_id if 'new_calendar_id' in locals() else None
+        print(f"⚠️  Error eliminando evento del calendario {calendar_id}: {e}")
+        return False
 
 def _adaptar_item_monday_a_evento_google(item_procesado, board_id=None):
     """
@@ -356,8 +397,8 @@ def _adaptar_item_monday_a_evento_google(item_procesado, board_id=None):
             # Marcar como solo lectura para prevenir ediciones manuales
             'transparency': 'opaque',
             'visibility': 'default',
-            # Agregar aviso en el título para desalentar ediciones
-            'summary': f'📌 {summary}',
+            # Título sin emoji para mantener limpieza
+            'summary': summary,
             'description': f'{description}\n\n🚨 IMPORTANTE: Este evento se sincroniza automáticamente desde Monday.com\n⚠️  NO EDITAR MANUALMENTE - Los cambios se perderán en la próxima sincronización\n✅ Para modificar: Editar en Monday.com → https://stupendastic.monday.com/boards/{board_id}'
         }
         
@@ -480,55 +521,59 @@ def sincronizar_item_via_webhook(item_id, monday_handler, google_service=None, c
             if success:
                 print(f"✅ Evento actualizado exitosamente")
                 
-                # También actualizar en calendario personal si existe
-                personal_calendar_id = _get_personal_calendar_id_for_item(item_procesado)
-                if personal_calendar_id:
+                # También actualizar en calendarios personales si existen
+                personal_calendar_ids = _get_personal_calendar_ids_for_item(item_procesado)
+                if personal_calendar_ids:
                     try:
-                        print(f"👤 Verificando evento personal para actualización...")
-                        # Buscar el evento personal usando las extendedProperties (más confiable)
+                        print(f"👤 Verificando eventos personales para actualización...")
                         monday_item_id = str(item_procesado.get('id', ''))
                         
                         if monday_item_id:
-                            try:
-                                # Listar eventos del calendario personal
-                                events_result = google_service.events().list(
-                                    calendarId=personal_calendar_id,
-                                    maxResults=50,
-                                    singleEvents=True
-                                ).execute()
-                                
-                                events = events_result.get('items', [])
-                                personal_event_id = None
-                                
-                                # Buscar el evento que tenga el mismo monday_item_id en extendedProperties
-                                for event in events:
-                                    extended_props = event.get('extendedProperties', {}).get('private', {})
-                                    if extended_props.get('monday_item_id') == monday_item_id:
-                                        personal_event_id = event.get('id')
-                                        print(f"🔍 Encontrado evento personal con ID: {personal_event_id}")
-                                        break
-                                
-                                if personal_event_id:
-                                    print(f"🔄 Actualizando evento personal: {personal_event_id}")
-                                    update_success = update_google_event(
-                                        google_service,
-                                        personal_calendar_id,
-                                        personal_event_id,
-                                        event_body
-                                    )
-                                    if update_success:
-                                        print(f"✅ Evento personal actualizado correctamente")
+                            # Actualizar eventos en todos los calendarios personales
+                            for personal_calendar_id in personal_calendar_ids:
+                                try:
+                                    print(f"🔄 Procesando calendario personal: {personal_calendar_id}")
+                                    
+                                    # Listar eventos del calendario personal
+                                    events_result = google_service.events().list(
+                                        calendarId=personal_calendar_id,
+                                        maxResults=50,
+                                        singleEvents=True
+                                    ).execute()
+                                    
+                                    events = events_result.get('items', [])
+                                    personal_event_id = None
+                                    
+                                    # Buscar el evento que tenga el mismo monday_item_id en extendedProperties
+                                    for event in events:
+                                        extended_props = event.get('extendedProperties', {}).get('private', {})
+                                        if extended_props.get('monday_item_id') == monday_item_id:
+                                            personal_event_id = event.get('id')
+                                            print(f"🔍 Encontrado evento personal con ID: {personal_event_id}")
+                                            break
+                                    
+                                    if personal_event_id:
+                                        print(f"🔄 Actualizando evento personal: {personal_event_id}")
+                                        update_success = update_google_event(
+                                            google_service,
+                                            personal_calendar_id,
+                                            personal_event_id,
+                                            event_body
+                                        )
+                                        if update_success:
+                                            print(f"✅ Evento personal actualizado correctamente")
+                                        else:
+                                            print(f"⚠️  Error actualizando evento personal")
                                     else:
-                                        print(f"⚠️  Error actualizando evento personal")
-                                else:
-                                    print(f"ℹ️  No se encontró evento personal con monday_item_id: {monday_item_id}")
-                                    print(f"ℹ️  Esto puede ser normal si es la primera sincronización")
-                            except Exception as search_error:
-                                print(f"⚠️  Error buscando evento personal: {search_error}")
+                                        print(f"ℹ️  No se encontró evento personal en este calendario")
+                                        print(f"ℹ️  Esto puede ser normal si es la primera sincronización")
+                                        
+                                except Exception as calendar_error:
+                                    print(f"⚠️  Error procesando calendario {personal_calendar_id}: {calendar_error}")
                         else:
                             print(f"⚠️  No se puede buscar evento personal sin monday_item_id")
                     except Exception as e:
-                        print(f"⚠️  Error actualizando evento personal: {e}")
+                        print(f"⚠️  Error actualizando eventos personales: {e}")
             else:
                 print(f"❌ Error actualizando evento")
                 return False
@@ -570,25 +615,27 @@ def sincronizar_item_via_webhook(item_id, monday_handler, google_service=None, c
                     print(f"⚠️  Evento creado pero no se pudo guardar ID en Monday")
                     # Continuar de todas formas, el evento ya existe en Google
 
-                # Intentar crear también en calendario personal (si hay operario configurado)
-                print(f"🔍 Debug: Verificando calendario personal para operario...")
-                personal_calendar_id = _get_personal_calendar_id_for_item(item_procesado)
-                if personal_calendar_id:
-                    try:
-                        print(f"👤 Creando evento en calendario personal: {personal_calendar_id}")
-                        personal_event_id = create_google_event(
-                            google_service,
-                            personal_calendar_id,
-                            event_body
-                        )
-                        if personal_event_id:
-                            print(f"✅ Evento creado en calendario personal: {personal_event_id}")
-                        else:
-                            print("⚠️  No se pudo crear el evento personal (sin ID)")
-                    except Exception as e:
-                        print(f"⚠️  Error creando evento personal: {e}")
+                # Intentar crear también en calendarios personales (si hay operarios configurados)
+                print(f"🔍 Debug: Verificando calendarios personales para operarios...")
+                personal_calendar_ids = _get_personal_calendar_ids_for_item(item_procesado)
+                if personal_calendar_ids:
+                    print(f"👤 Creando eventos en {len(personal_calendar_ids)} calendarios personales")
+                    for personal_calendar_id in personal_calendar_ids:
+                        try:
+                            print(f"👤 Creando evento en calendario personal: {personal_calendar_id}")
+                            personal_event_id = create_google_event(
+                                google_service,
+                                personal_calendar_id,
+                                event_body
+                            )
+                            if personal_event_id:
+                                print(f"✅ Evento creado en calendario personal: {personal_event_id}")
+                            else:
+                                print("⚠️  No se pudo crear el evento personal (sin ID)")
+                        except Exception as e:
+                            print(f"⚠️  Error creando evento personal en {personal_calendar_id}: {e}")
                 else:
-                    print("ℹ️  No hay calendario personal configurado para este operario")
+                    print("ℹ️  No hay calendarios personales configurados para estos operarios")
             else:
                 print(f"❌ Error creando evento - no se recibió ID válido")
                 return False
