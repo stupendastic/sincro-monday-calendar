@@ -121,6 +121,10 @@ def parse_monday_item(item):
                             parsed_item['operario_ids'] = [p.get('id') for p in value_data['personsAndTeams']]
                     except:
                         parsed_item['operario_ids'] = []
+            elif col_id == config.COL_CLIENTE:
+                parsed_item['cliente'] = col_text
+            elif col_id == "ubicaci_n":  # Columna de ubicación
+                parsed_item['ubicacion'] = col_text
             
         return parsed_item
         
@@ -168,6 +172,86 @@ def _get_personal_calendar_id_for_item(item_procesado):
         print(f"❌ Debug: Error en _get_personal_calendar_id_for_item: {e}")
         return None
 
+
+def _get_personal_calendar_id_by_name(operario_name):
+    """Obtiene el calendar_id personal por nombre de operario directo."""
+    try:
+        if not operario_name:
+            return None
+            
+        profiles = getattr(config, 'FILMMAKER_PROFILES', [])
+        operario_limpio = operario_name.strip()
+        
+        for profile in profiles:
+            monday_name = profile.get('monday_name', '').strip()
+            if monday_name == operario_limpio:
+                return profile.get('calendar_id')
+        
+        return None
+    except Exception:
+        return None
+
+
+def _handle_operario_change(google_service, monday_item_id, old_operario, new_operario):
+    """Maneja el cambio de operario moviendo el evento personal del calendario anterior al nuevo."""
+    try:
+        print(f"👤 Detectado cambio de operario: '{old_operario}' → '{new_operario}'")
+        
+        # Obtener calendarios personal anterior y nuevo
+        old_calendar_id = _get_personal_calendar_id_by_name(old_operario)
+        new_calendar_id = _get_personal_calendar_id_by_name(new_operario)
+        
+        if not old_calendar_id:
+            print(f"ℹ️  No hay calendario personal configurado para operario anterior: {old_operario}")
+            return None
+            
+        if not new_calendar_id:
+            print(f"ℹ️  No hay calendario personal configurado para nuevo operario: {new_operario}")
+            return None
+            
+        if old_calendar_id == new_calendar_id:
+            print(f"ℹ️  Mismo calendar_id para ambos operarios, no es necesario mover")
+            return new_calendar_id
+        
+        # Buscar el evento en el calendario anterior
+        print(f"🔍 Buscando evento personal en calendario anterior...")
+        events_result = google_service.events().list(
+            calendarId=old_calendar_id,
+            maxResults=50,
+            singleEvents=True
+        ).execute()
+        
+        events = events_result.get('items', [])
+        old_event_id = None
+        event_to_move = None
+        
+        # Buscar el evento que tenga el mismo monday_item_id
+        for event in events:
+            extended_props = event.get('extendedProperties', {}).get('private', {})
+            if extended_props.get('monday_item_id') == str(monday_item_id):
+                old_event_id = event.get('id')
+                event_to_move = event
+                print(f"🔍 Encontrado evento personal en calendario anterior: {old_event_id}")
+                break
+        
+        if not event_to_move:
+            print(f"ℹ️  No se encontró evento personal en calendario anterior")
+            return new_calendar_id
+        
+        # Eliminar del calendario anterior
+        print(f"🗑️  Eliminando evento del calendario anterior...")
+        google_service.events().delete(
+            calendarId=old_calendar_id,
+            eventId=old_event_id
+        ).execute()
+        print(f"✅ Evento eliminado del calendario anterior")
+        
+        return new_calendar_id
+        
+    except Exception as e:
+        print(f"⚠️  Error manejando cambio de operario: {e}")
+        return new_calendar_id if 'new_calendar_id' in locals() else None
+
 def _adaptar_item_monday_a_evento_google(item_procesado, board_id=None):
     """
     Adapta un item de Monday.com al formato de evento de Google Calendar.
@@ -176,13 +260,24 @@ def _adaptar_item_monday_a_evento_google(item_procesado, board_id=None):
         # Título del evento
         summary = item_procesado.get('name', 'Evento sin título')
         
-        # Descripción básica
-        description = f"Evento sincronizado desde Monday.com\n"
-        description += f"ID del item: {item_procesado.get('id')}\n"
+        # Descripción completa con todos los datos relevantes
+        operario = item_procesado.get('operario', 'No asignado')
+        cliente = item_procesado.get('cliente', 'No especificado')
+        ubicacion = item_procesado.get('ubicacion', 'No especificada')
         
-        operario = item_procesado.get('operario', '')
-        if operario:
-            description += f"Operario: {operario}\n"
+        description = f"""📋 DETALLES DEL EVENTO
+🎬 Proyecto: {summary}
+👤 Operario: {operario}
+🏢 Cliente: {cliente}
+📍 Ubicación: {ubicacion}
+
+🔗 ENLACES
+📊 Ver en Monday.com: https://stupendastic.monday.com/boards/{board_id}
+📅 Item ID: {item_procesado.get('id', 'N/A')}
+
+⚙️ INFORMACIÓN DEL SISTEMA
+🔄 Sincronizado automáticamente desde Monday.com
+📊 Board ID: {board_id}"""
         
         # Procesar fecha
         fecha_inicio_str = item_procesado.get('fecha_inicio', '')
@@ -243,7 +338,7 @@ def _adaptar_item_monday_a_evento_google(item_procesado, board_id=None):
                     'timeZone': 'Europe/Madrid'
                 }
         
-        # Construir el evento
+        # Construir el evento con protecciones de solo lectura
         event_body = {
             'summary': summary,
             'description': description,
@@ -253,9 +348,17 @@ def _adaptar_item_monday_a_evento_google(item_procesado, board_id=None):
                 'private': {
                     'monday_item_id': str(item_procesado.get('id', '')),
                     'board_id': str(board_id) if board_id else '',
-                    'sync_version': str(int(time.time()))
+                    'sync_version': str(int(time.time())),
+                    'source': 'monday_sync_system',
+                    'read_only': 'true'
                 }
-            }
+            },
+            # Marcar como solo lectura para prevenir ediciones manuales
+            'transparency': 'opaque',
+            'visibility': 'default',
+            # Agregar aviso en el título para desalentar ediciones
+            'summary': f'📌 {summary}',
+            'description': f'{description}\n\n🚨 IMPORTANTE: Este evento se sincroniza automáticamente desde Monday.com\n⚠️  NO EDITAR MANUALMENTE - Los cambios se perderán en la próxima sincronización\n✅ Para modificar: Editar en Monday.com → https://stupendastic.monday.com/boards/{board_id}'
         }
         
         return event_body
@@ -304,7 +407,7 @@ def sincronizar_item_via_webhook(item_id, monday_handler, google_service=None, c
             item_data = monday_handler.get_item_by_id(
                 board_id=str(config.BOARD_ID_GRABACIONES),
                 item_id=str(item_id),
-                column_ids=[config.COL_GOOGLE_EVENT_ID, config.COL_FECHA, "personas1", "name"]
+                column_ids=[config.COL_GOOGLE_EVENT_ID, config.COL_FECHA, "personas1", "name", config.COL_CLIENTE, "ubicaci_n"]
             )
             
             if not item_data:

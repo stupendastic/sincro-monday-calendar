@@ -6,8 +6,6 @@ BOARD_ID_GRABACIONES = 3324095194
 # --- CONFIGURACIÓN DE CALENDARIOS MAESTROS ---
 
 # ID del calendario maestro donde se centralizarán todos los eventos
-# MASTER_CALENDAR_ID = "c_54252371e4711a101b072dd3715ed3aadcf71ac45af65b988a5a7d272ffbe31d@group.calendar.google.com"
-# MASTER_CALENDAR_ID = "c_54252371e4711a101b072dd3715ed3aadcf71ac45af65b988a5a7d272ffbe31d@group.calendar.google.com"
 MASTER_CALENDAR_ID = "c_54252371e4711a101b072dd3715ed3aadcf71ac45af65b988a5a7d272ffbe31d@group.calendar.google.com"
 
 # ID del calendario para eventos sin asignar
