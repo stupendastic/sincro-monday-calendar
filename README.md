@@ -1,31 +1,133 @@
-# Monday → Google Calendar Sync (Unidirectional)
+# Monday → Google Calendar Sync (Sistema Unidireccional Multi-Operarios)
 
-Sistema de sincronización **unidireccional** Monday.com → Google Calendar.
+Sistema de sincronización **unidireccional** Monday.com → Google Calendar con soporte completo para múltiples operarios.
 
-## 🎯 Sistema Actual (v4.0 - Clean)
+## 🎯 Sistema Actual (v5.0 - Multi-Operarios + Protección Total)
 
 - ✅ **Monday → Google**: Sincronización completa y optimizada
 - ❌ **Google → Monday**: DESHABILITADO (sistema unidireccional)
-- 📊 **Monitoreo**: Detección pasiva de cambios manuales
-- 🧹 **Proyecto**: Limpio y organizado para producción
+- 👥 **Multi-Operarios**: Soporte completo para múltiples operarios por evento
+- 🔒 **Protección Total**: Calendarios configurados como solo lectura
+- 📊 **Sistema Anti-Bucles**: Detección inteligente de automatización
+- 🧹 **Proyecto Limpio**: Optimizado para producción
 
-## 🔄 Cambio Importante: Sistema Unidireccional
+## 🚀 Funcionalidades Principales
 
-**Este sistema ha sido convertido de bidireccional a unidireccional para mayor estabilidad:**
+### ✅ Sistema Multi-Operarios
+- **Soporte completo** para múltiples operarios por evento
+- **Sincronización automática** en calendario master + 1 calendario personal por operario
+- **Gestión inteligente** de cambios de operarios (añadir/quitar automáticamente)
+- **Ejemplo**: 2 operarios = 3 calendarios (1 master + 2 personales)
 
-### ✅ Ventajas del Sistema Unidireccional
-- **Elimina bucles infinitos**: No más problemas de sincronización circular
-- **Elimina problemas SSL**: No necesita webhooks de Google Calendar
-- **Simplicidad**: Flujo unidireccional claro Monday → Google
-- **Confiabilidad**: Monday.com como fuente única de verdad
-- **Mantenimiento**: Menos código, menos puntos de fallo
+### 🔒 Protección Total contra Edición Manual
+- **Calendarios bloqueados**: No se pueden mover/editar eventos desde Google Calendar
+- **Eventos protegidos**: Configurados con `locked: true` y permisos restrictivos
+- **Descripciones informativas**: Aviso claro de sincronización automática
+- **Monday.com como fuente única**: Todos los cambios deben hacerse en Monday
 
-### ⚠️ Cambios Realizados
-- ❌ **Webhooks Google → Monday**: Completamente eliminados
-- ❌ **Sync tokens**: Sistema eliminado
-- ❌ **Sincronización inversa**: Deshabilitada
-- ✅ **Monitoreo de cambios**: Sistema pasivo implementado
-- ✅ **Monday → Google**: Funcionamiento optimizado
+### 📊 Información Completa en Eventos
+- **Datos del proyecto**: Cliente, ubicación, contactos
+- **Enlaces directos**: Monday.com y recursos del proyecto
+- **Historial de cambios**: Registro de modificaciones
+- **Formato limpio**: Sin emojis en títulos, información estructurada
+
+### 🛡️ Sistema Anti-Bucles Robusto
+- **Detección de automatización**: Previene bucles del propio sistema
+- **Hash de contenido**: Detecta cambios reales vs ecos
+- **Cooldowns inteligentes**: Evita sincronizaciones excesivas
+- **Estado persistente**: Memoria de sincronizaciones previas
+
+## ⚠️ Limitaciones y Consideraciones para Producción
+
+### 🔧 Webhook Actual
+- **Tipo configurado**: `update_column_value` - Solo detecta cambios en columnas específicas
+- **NO detecta**: Cambios de nombre del item, creación de items, eliminación de items
+- **SÍ detecta**: Cambios de fecha, operario, cliente, ubicación
+- **⚠️ Recomendación**: Cambiar a `any_change` para detección completa
+
+### 🚨 Múltiples Cambios Simultáneos
+- **Problema identificado**: Si modificas 10+ elementos a la vez, se generan múltiples webhooks simultáneos
+- **Riesgo**: Sobrecarga del sistema, posible pérdida de sincronizaciones, errores de API
+- **Impacto**: Webhooks pueden procesarse en orden aleatorio, causing inconsistencias
+
+### 🎯 Solución Recomendada: Integración con Orchestrator
+
+**Sistema Orchestrator con Cola Redis** (Pendiente de implementación):
+
+```python
+# Propuesta de integración
+def webhook_handler_with_queue():
+    """Recibe webhook y lo añade a cola Redis para procesamiento secuencial"""
+    webhook_data = request.json
+    
+    # Añadir a cola Redis
+    orchestrator_queue.enqueue('monday_sync_job', {
+        'item_id': webhook_data.get('pulseId'),
+        'webhook_data': webhook_data,
+        'timestamp': datetime.now().isoformat(),
+        'priority': 'normal'
+    })
+    
+    return jsonify({'status': 'queued'})
+
+def orchestrator_worker():
+    """Worker que procesa webhooks uno por uno desde la cola"""
+    while True:
+        job = orchestrator_queue.dequeue('monday_sync_job')
+        if job:
+            try:
+                # Procesar sincronización
+                sincronizar_item_via_webhook(job.data['item_id'])
+                
+                # Pausa entre procesamientos
+                time.sleep(1)
+                
+                # Marcar como completado
+                job.mark_completed()
+                
+            except Exception as e:
+                # Marcar como fallido y reencolar
+                job.mark_failed(error=str(e))
+                job.retry(delay=30)
+```
+
+**Beneficios del Sistema con Cola:**
+- ✅ **Procesamiento secuencial**: Uno por uno, sin sobrecargas
+- ✅ **Resilencia**: Reintentos automáticos en caso de error
+- ✅ **Escalabilidad**: Maneja cientos de cambios simultáneos
+- ✅ **Monitoreo**: Visibilidad completa del estado de la cola
+- ✅ **Priorización**: Trabajos urgentes pueden tener prioridad
+
+### 📋 Tareas Pendientes para Producción
+
+#### 🔄 Webhook Mejorado
+```bash
+# Cambiar configuración en Monday.com
+Webhook Type: any_change  # En lugar de update_column_value
+Events: create_pulse, update_pulse, delete_pulse, update_column_value
+```
+
+#### 🏗️ Integración con Orchestrator
+```python
+# Modificaciones requeridas en app.py
+@app.route('/monday-webhook', methods=['POST'])
+def handle_monday_webhook():
+    # Validar webhook
+    webhook_data = request.json
+    
+    # Enviar a Orchestrator en lugar de procesar directamente
+    orchestrator_client.enqueue_job('monday_sync', webhook_data)
+    
+    return jsonify({'status': 'queued'})
+
+# Nuevo endpoint para Orchestrator
+@app.route('/orchestrator/process-sync', methods=['POST'])
+def process_sync_from_orchestrator():
+    # Procesar sincronización desde Orchestrator
+    job_data = request.json
+    result = sincronizar_item_via_webhook(job_data['item_id'])
+    return jsonify({'result': result})
+```
 
 ## 🏗️ Arquitectura del Sistema
 

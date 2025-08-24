@@ -55,7 +55,6 @@ coverage/
 # Temporary folders
 tmp/
 temp/
-test/
 
 # Python virtual environment
 venv/
@@ -63,4 +62,17 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python 
+.Python
+
+# Project specific temporary files
+*_backup.py
+*_broken.py
+*_temp.py
+test_*.py
+config_example.py
+logs/
+SISTEMA_*.md
+
+# Archivos específicos del proyecto
+google_change_monitor.py
+monday_service.py
