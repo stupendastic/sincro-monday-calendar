@@ -90,12 +90,12 @@
     "last_sync_timestamp": 1756038659.4781928
   },
   "9884731878_dufshse4m9gouao5r19t89urqs": {
-    "last_monday_update": 1756040682.423559,
+    "last_monday_update": 1756041182.464362,
     "last_google_update": 0,
-    "monday_content_hash": "a9f0fa00dc2ac68484cd2bc40d7a48c0",
+    "monday_content_hash": "9b2fa440e7927806524497ac27e6730e",
     "google_content_hash": "",
-    "sync_version": 9,
+    "sync_version": 10,
     "last_sync_direction": "monday_to_google",
-    "last_sync_timestamp": 1756040682.424
+    "last_sync_timestamp": 1756041182.464486
   }
 }
