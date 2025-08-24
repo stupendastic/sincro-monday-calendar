@@ -1,0 +1,78 @@
+{
+  "webhooks_personales": [
+    {
+      "calendar_id": "c_e3eb24d0025d12e9f506b9b988563f744cc59f7869d7c79aaca7ab9043769d85@group.calendar.google.com",
+      "calendar_name": "Arnau Admin",
+      "channel_id": "stupendastic-personal-43769d85",
+      "resource_id": "VA6nFjiwFWhJZTdkNmXXORFvXp4",
+      "expiration": "1756490365000",
+      "webhook_url": "https://1f6deb6593e0.ngrok-free.app/google-webhook",
+      "created_at": "2025-08-22T19:59:26.287692",
+      "updated_at": "2025-08-23T13:39:19.490952"
+    },
+    {
+      "calendar_id": "c_69308b9a3d04d3f03b5de726e8c1e39c55993896c4e5bf4fa43c15ea30304841@group.calendar.google.com",
+      "calendar_name": "Xavi Alba",
+      "channel_id": "stupendastic-personal-30304841",
+      "resource_id": "YyawJ-mSnlbc9txUtV-NFyOnpyk",
+      "expiration": "1756490366000",
+      "webhook_url": "https://1f6deb6593e0.ngrok-free.app/google-webhook",
+      "created_at": "2025-08-22T19:59:26.935642",
+      "updated_at": "2025-08-23T13:39:19.490963"
+    },
+    {
+      "calendar_id": "c_3f590bced29ca0483a2ea4ef2596cb4cd6f05245ffeef5887b96c4921ac48412@group.calendar.google.com",
+      "calendar_name": "Oriol",
+      "channel_id": "stupendastic-personal-1ac48412",
+      "resource_id": "MxivQJzxaE_jsHdgnT5VidYJAvo",
+      "expiration": "1756490367000",
+      "webhook_url": "https://1f6deb6593e0.ngrok-free.app/google-webhook",
+      "created_at": "2025-08-22T19:59:27.428525",
+      "updated_at": "2025-08-23T13:39:19.490967"
+    },
+    {
+      "calendar_id": "c_7bebe0169cb41ecba6662220c3699628a3bfa5f1c82b7a1d816ab495298a5c63@group.calendar.google.com",
+      "calendar_name": "Jordi Vas",
+      "channel_id": "stupendastic-personal-298a5c63",
+      "resource_id": "XmQxalhnk-e9jIhH0yN5xjnQLwc",
+      "expiration": "1756490367000",
+      "webhook_url": "https://1f6deb6593e0.ngrok-free.app/google-webhook",
+      "created_at": "2025-08-22T19:59:28.093165",
+      "updated_at": "2025-08-23T13:39:19.490970"
+    },
+    {
+      "calendar_id": "c_7b9e66757dacfbda0f0224b6fc04ca477ceac501ab42ae1834b2ccdbeb53528e@group.calendar.google.com",
+      "calendar_name": "Rubén García",
+      "channel_id": "stupendastic-personal-eb53528e",
+      "resource_id": "lFkOQX9xY2hLBNII-ax1PYOtmaQ",
+      "expiration": "1756490368000",
+      "webhook_url": "https://1f6deb6593e0.ngrok-free.app/google-webhook",
+      "created_at": "2025-08-22T19:59:28.604050",
+      "updated_at": "2025-08-23T13:39:19.490972"
+    },
+    {
+      "calendar_id": "c_e35f6a0f60db31f23bac8481e81ad877521ca86d6fae11bc0a9d52c9b25ee1cd@group.calendar.google.com",
+      "calendar_name": "Tono Burguete",
+      "channel_id": "stupendastic-personal-b25ee1cd",
+      "resource_id": "0ess9ru7r0owGaPafKnihpT4Efc",
+      "expiration": "1756490368000",
+      "webhook_url": "https://1f6deb6593e0.ngrok-free.app/google-webhook",
+      "created_at": "2025-08-22T19:59:29.142847",
+      "updated_at": "2025-08-23T13:39:19.490974"
+    },
+    {
+      "calendar_id": "c_9b7f0685a7a9436ae17d102933065432c4597791b0f5ec796a0851f76b54b11f@group.calendar.google.com",
+      "calendar_name": "Josep",
+      "channel_id": "stupendastic-personal-6b54b11f",
+      "resource_id": "21GCtxKUfYU8Vu3KxGJZF_IiDIc",
+      "expiration": "1756490369000",
+      "webhook_url": "https://1f6deb6593e0.ngrok-free.app/google-webhook",
+      "created_at": "2025-08-22T19:59:29.745753",
+      "updated_at": "2025-08-23T13:39:19.490977"
+    }
+  ],
+  "total_webhooks": 7,
+  "created_at": "2025-08-22T19:59:29.746798",
+  "updated_at": "2025-08-23T13:39:19.490979",
+  "previous_created_at": "2025-08-22T19:59:29.746798"
+}

@@ -1,19 +1,50 @@
 import os
 import json
 import time
+import ssl
+import socket
 from datetime import datetime, timedelta
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import HttpRequest
+import httplib2
 
 # Configuración de la API de Google Calendar
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
+def create_http_with_retries():
+    """
+    Crea un objeto HTTP con configuración robusta para evitar errores SSL.
+    """
+    # Configurar timeouts más largos
+    timeout = 60  # 60 segundos
+    
+    # Crear contexto SSL personalizado con configuración más permisiva
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    
+    # Configurar opciones SSL adicionales
+    ssl_context.options |= ssl.OP_NO_SSLv2
+    ssl_context.options |= ssl.OP_NO_SSLv3
+    ssl_context.options |= ssl.OP_NO_TLSv1
+    ssl_context.options |= ssl.OP_NO_TLSv1_1
+    
+    # Configurar HTTP con reintentos y configuración SSL robusta
+    http = httplib2.Http(
+        timeout=timeout,
+        disable_ssl_certificate_validation=True,
+        ca_certs=None
+    )
+    
+    return http
+
 def get_calendar_service():
     """
-    Obtiene el servicio de Google Calendar autenticado.
+    Obtiene el servicio de Google Calendar autenticado con manejo robusto de errores SSL.
     """
     creds = None
     
@@ -24,17 +55,35 @@ def get_calendar_service():
     # Si no hay credenciales válidas disponibles, deja que el usuario se autentique
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except Exception as e:
+                print(f"❌ Error refrescando credenciales: {e}")
+                return None
         else:
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
+            try:
+                flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+                creds = flow.run_local_server(port=0)
+            except Exception as e:
+                print(f"❌ Error en autenticación: {e}")
+                return None
         
         # Guarda las credenciales para la próxima ejecución
-        with open('config/token.json', 'w') as token:
-            token.write(creds.to_json())
+        try:
+            with open('config/token.json', 'w') as token:
+                token.write(creds.to_json())
+        except Exception as e:
+            print(f"❌ Error guardando credenciales: {e}")
     
     try:
-        service = build('calendar', 'v3', credentials=creds)
+        # Crear servicio con configuración simplificada para unidirectional sync
+        service = build(
+            'calendar', 
+            'v3', 
+            credentials=creds, 
+            cache_discovery=False
+        )
+        
         return service
     except Exception as e:
         print(f"❌ Error al crear el servicio de Google Calendar: {e}")
@@ -42,7 +91,7 @@ def get_calendar_service():
 
 def create_google_event(service, calendar_id, event_body, extended_properties=None):
     """
-    Crea un nuevo evento en un calendario de Google.
+    Crea un nuevo evento en un calendario de Google con manejo robusto de errores.
     
     Args:
         service: Objeto de servicio de Google Calendar
@@ -50,6 +99,10 @@ def create_google_event(service, calendar_id, event_body, extended_properties=No
         event_body: Diccionario con el cuerpo del evento (summary, description, start, end, etc.)
         extended_properties: Propiedades extendidas opcionales para el evento
     """
+    if not service:
+        print("  ❌ Servicio de Google Calendar no disponible")
+        return None
+        
     # Crear una copia del event_body para no modificar el original
     event = event_body.copy()
     
@@ -57,19 +110,39 @@ def create_google_event(service, calendar_id, event_body, extended_properties=No
     if extended_properties:
         event['extendedProperties'] = extended_properties
 
-    try:
-        event_name = event.get('summary', 'Sin título')
-        print(f"  -> Creando evento en Google Calendar: '{event_name}'")
-        created_event = service.events().insert(calendarId=calendar_id, body=event).execute()
-        print(f"  ✅ ¡Evento creado! ID: {created_event.get('id')}")
-        return created_event.get('id')
-    except HttpError as error:
-        print(f"  ❌ Error al crear evento en Google Calendar: {error}")
-        return None
+    # Reintentos para manejar errores SSL
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            event_name = event.get('summary', 'Sin título')
+            print(f"  -> Creando evento en Google Calendar: '{event_name}' (intento {attempt + 1}/{max_retries})")
+            
+            # Configurar timeout más largo para evitar errores SSL
+            request = service.events().insert(calendarId=calendar_id, body=event)
+            created_event = request.execute()
+            
+            print(f"  ✅ ¡Evento creado! ID: {created_event.get('id')}")
+            return created_event.get('id')
+        except HttpError as error:
+            print(f"  ❌ Error HTTP al crear evento: {error}")
+            if attempt < max_retries - 1:
+                print(f"  🔄 Reintentando en 2 segundos...")
+                time.sleep(2)
+                continue
+            return None
+        except Exception as e:
+            print(f"  ❌ Error inesperado al crear evento: {e}")
+            if attempt < max_retries - 1:
+                print(f"  🔄 Reintentando en 2 segundos...")
+                time.sleep(2)
+                continue
+            return None
+    
+    return None
 
 def update_google_event(service, calendar_id, event_id, event_body):
     """
-    Actualiza un evento existente en Google Calendar.
+    Actualiza un evento existente en Google Calendar con manejo robusto de errores.
     
     Args:
         service: Objeto de servicio de Google Calendar
@@ -77,19 +150,43 @@ def update_google_event(service, calendar_id, event_id, event_body):
         event_id: ID del evento a actualizar
         event_body: Diccionario con el cuerpo del evento (summary, description, start, end, etc.)
     """
-    try:
-        event_name = event_body.get('summary', 'Sin título')
-        print(f"  -> Actualizando evento en Google Calendar: '{event_name}' (ID: {event_id})")
-        updated_event = service.events().update(
-            calendarId=calendar_id, 
-            eventId=event_id, 
-            body=event_body
-        ).execute()
-        print(f"  ✅ ¡Evento actualizado! ID: {updated_event.get('id')}")
-        return updated_event.get('id')
-    except HttpError as error:
-        print(f"  ❌ Error al actualizar evento en Google Calendar: {error}")
+    if not service:
+        print("  ❌ Servicio de Google Calendar no disponible")
         return None
+        
+    # Reintentos para manejar errores SSL
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            event_name = event_body.get('summary', 'Sin título')
+            print(f"  -> Actualizando evento en Google Calendar: '{event_name}' (ID: {event_id}) (intento {attempt + 1}/{max_retries})")
+            
+            # Configurar timeout más largo para evitar errores SSL
+            request = service.events().update(
+                calendarId=calendar_id, 
+                eventId=event_id, 
+                body=event_body
+            )
+            updated_event = request.execute()
+            
+            print(f"  ✅ ¡Evento actualizado! ID: {updated_event.get('id')}")
+            return updated_event.get('id')
+        except HttpError as error:
+            print(f"  ❌ Error HTTP al actualizar evento: {error}")
+            if attempt < max_retries - 1:
+                print(f"  🔄 Reintentando en 2 segundos...")
+                time.sleep(2)
+                continue
+            return None
+        except Exception as e:
+            print(f"  ❌ Error inesperado al actualizar evento: {e}")
+            if attempt < max_retries - 1:
+                print(f"  🔄 Reintentando en 2 segundos...")
+                time.sleep(2)
+                continue
+            return None
+    
+    return None
 
 def update_google_event_by_id(service, calendar_id, event_id, event_body, extended_properties=None):
     """
@@ -212,114 +309,11 @@ def get_recently_updated_events(service, calendar_id, minutes_ago=5):
         print(f"  ❌ Error al obtener eventos actualizados: {error}")
         return []
 
-def get_incremental_sync_events(service, calendar_id, sync_token=None):
-    """
-    Obtiene eventos usando sincronización incremental con sync tokens.
-    Esta es la forma RECOMENDADA por Google para evitar bucles infinitos.
-    
-    Args:
-        service: Objeto de servicio de Google Calendar
-        calendar_id: ID del calendario
-        sync_token: Token de sincronización anterior (None para primera vez)
-    
-    Returns:
-        tuple: (events, next_sync_token) o (None, None) si hay error
-    """
-    try:
-        # Parámetros para sincronización incremental
-        params = {
-            'calendarId': calendar_id,
-            'showDeleted': True,
-            'singleEvents': True
-        }
-        
-        # Si tenemos sync_token, usarlo para obtener solo cambios
-        if sync_token:
-            params['syncToken'] = sync_token
-            print(f"  🔄 Sincronización incremental con sync token")
-        else:
-            # Primera vez: obtener todos los eventos
-            print(f"  🔄 Primera sincronización - obteniendo todos los eventos")
-        
-        response = service.events().list(**params).execute()
-        events = response.get('items', [])
-        next_sync_token = response.get('nextSyncToken')
-        
-        print(f"  ✅ Sincronización incremental: {len(events)} eventos, next_sync_token: {next_sync_token[:20] if next_sync_token else 'None'}")
-        
-        return events, next_sync_token
-        
-    except HttpError as error:
-        if error.resp.status == 410:
-            # Sync token expirado, necesitamos hacer una sincronización completa
-            print(f"  ⚠️  Sync token expirado, haciendo sincronización completa")
-            return get_incremental_sync_events(service, calendar_id, None)
-        else:
-            print(f"  ❌ Error en sincronización incremental: {error}")
-            return None, None
+# get_incremental_sync_events REMOVED for unidirectional sync
+# System now only supports Monday → Google synchronization
 
-def compare_event_values(event_google, item_monday):
-    """
-    Compara los valores de un evento de Google con un item de Monday.
-    Retorna True si hay diferencias que requieren sincronización.
-    
-    Args:
-        event_google: Evento de Google Calendar
-        item_monday: Item de Monday.com procesado
-    
-    Returns:
-        bool: True si hay diferencias, False si están sincronizados
-    """
-    try:
-        # Comparar título/nombre
-        google_title = event_google.get('summary', '')
-        monday_name = item_monday.get('nombre', '')
-        
-        if google_title != monday_name:
-            print(f"  📝 Diferencia en título: Google '{google_title}' vs Monday '{monday_name}'")
-            return True
-        
-        # Comparar fecha/hora
-        google_start = event_google.get('start', {})
-        monday_fecha = item_monday.get('fecha_inicio', '')
-        
-        if 'dateTime' in google_start:
-            google_datetime = google_start['dateTime']
-            # Normalizar formato de Google
-            if google_datetime.endswith('Z'):
-                google_datetime = google_datetime[:-1]
-            elif '+' in google_datetime:
-                google_datetime = google_datetime.split('+')[0]
-            
-            # Normalizar formato de Monday
-            if 'T' in monday_fecha:
-                if '+' in monday_fecha:
-                    monday_datetime = monday_fecha.split('+')[0]
-                else:
-                    monday_datetime = monday_fecha
-            else:
-                monday_datetime = f"{monday_fecha}T00:00:00"
-            
-            # Comparar con tolerancia de 1 minuto
-            try:
-                dt_google = datetime.fromisoformat(google_datetime)
-                dt_monday = datetime.fromisoformat(monday_datetime)
-                diferencia = abs((dt_google - dt_monday).total_seconds())
-                
-                if diferencia > 60:  # Más de 1 minuto de diferencia
-                    print(f"  🕐 Diferencia en fecha: Google '{google_datetime}' vs Monday '{monday_datetime}'")
-                    return True
-            except ValueError as e:
-                print(f"  ⚠️  Error comparando fechas: {e}")
-                return True
-        
-        # Si llegamos aquí, no hay diferencias significativas
-        print(f"  ✅ Evento sincronizado - no hay diferencias")
-        return False
-        
-    except Exception as e:
-        print(f"  ❌ Error comparando valores: {e}")
-        return True  # En caso de error, asumir que hay diferencias
+# compare_event_values REMOVED for unidirectional sync
+# System now only supports Monday → Google synchronization
 
 def create_and_share_calendar(service, filmmaker_name, filmmaker_email):
     """

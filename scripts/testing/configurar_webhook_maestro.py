@@ -2,9 +2,9 @@
 """
 Script simple para configurar webhook del calendario maestro
 """
+import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-import os
 import json
 from dotenv import load_dotenv
 from google_calendar_service import get_calendar_service
@@ -14,7 +14,7 @@ import config
 load_dotenv()
 
 # URL de ngrok
-NGROK_URL = "https://2e6cc727ffae.ngrok-free.app"
+NGROK_URL = "https://1f6deb6593e0.ngrok-free.app"
 
 def configurar_webhook_maestro():
     """Configura webhook para el calendario maestro"""
@@ -35,7 +35,8 @@ def configurar_webhook_maestro():
     
     try:
         # Crear un ID único para el canal maestro
-        channel_id = "stupendastic-master-calendar"
+        import uuid
+        channel_id = f"stupendastic-master-{uuid.uuid4().hex[:8]}"
         
         # Configurar push notifications
         channel_body = {
@@ -71,14 +72,14 @@ def configurar_webhook_maestro():
         
         # Actualizar el mapeo de canales
         try:
-            with open('config/channels/config/channels/google_channel_map.json', 'r', encoding='utf-8') as f:
+            with open('config/channels/google_channel_map.json', 'r', encoding='utf-8') as f:
                 channel_map = json.load(f)
         except FileNotFoundError:
             channel_map = {}
         
         channel_map[response['id']] = config.MASTER_CALENDAR_ID
         
-        with open('config/channels/config/channels/google_channel_map.json', 'w', encoding='utf-8') as f:
+        with open('config/channels/google_channel_map.json', 'w', encoding='utf-8') as f:
             json.dump(channel_map, f, indent=2)
         
         print(f"✅ Información guardada")

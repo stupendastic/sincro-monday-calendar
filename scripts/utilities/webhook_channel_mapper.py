@@ -20,7 +20,7 @@ def load_channel_map():
     Returns:
         dict: Diccionario con el mapeo channel_id -> calendar_id
     """
-    channel_map_file = "config/channels/config/channels/google_channel_map.json"
+    channel_map_file = "config/channels/google_channel_map.json"
     
     if os.path.exists(channel_map_file):
         try:
@@ -30,7 +30,7 @@ def load_channel_map():
             print(f"❌ Error al cargar mapeo de canales: {e}")
             return {}
     else:
-        print("⚠️  Archivo config/channels/config/channels/google_channel_map.json no encontrado")
+        print("⚠️  Archivo config/channels/google_channel_map.json no encontrado")
         return {}
 
 def get_calendar_id_from_channel(channel_id):
@@ -68,7 +68,7 @@ def example_webhook_usage():
         print(f"🔄 Ahora puedes usar {calendar_id} para obtener detalles del evento")
     else:
         print(f"❌ No se encontró calendar_id para channel_id: {example_channel_id}")
-        print("   Verifica que el canal esté registrado en config/channels/config/channels/google_channel_map.json")
+        print("   Verifica que el canal esté registrado en config/channels/google_channel_map.json")
 
 def show_channel_map():
     """

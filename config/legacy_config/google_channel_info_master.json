@@ -1,8 +1,8 @@
 {
-  "channel_id": "stupendastic-master-calendar",
+  "channel_id": "stupendastic-master-ed915fad",
   "resource_id": "QplubT0JB8KroxJ6TGGDGRjiPO0",
-  "expiration": "1756500310000",
-  "webhook_url": "https://2e6cc727ffae.ngrok-free.app/google-webhook",
+  "expiration": "1756509687000",
+  "webhook_url": "https://1f6deb6593e0.ngrok-free.app/google-webhook",
   "calendar_id": "c_54252371e4711a101b072dd3715ed3aadcf71ac45af65b988a5a7d272ffbe31d@group.calendar.google.com",
   "type": "master"
 }

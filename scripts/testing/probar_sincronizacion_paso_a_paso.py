@@ -1,178 +1,277 @@
 #!/usr/bin/env python3
 """
-Script para probar la sincronización paso a paso
+Script para probar la sincronización Monday ↔ Google Calendar paso a paso.
+Este script te guía a través del proceso de prueba.
 """
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-import os
-from dotenv import load_dotenv
-from monday_api_handler import MondayAPIHandler
-from google_calendar_service import get_calendar_service, create_google_event
-from config import BOARD_ID_GRABACIONES, MASTER_CALENDAR_ID, UNASSIGNED_CALENDAR_ID
 
-def probar_sincronizacion_paso_a_paso():
-    """Prueba la sincronización paso a paso"""
+import json
+import requests
+import time
+from datetime import datetime
+from pathlib import Path
+import sys
+import os
+
+# Añadir el directorio raíz al path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+def check_system_status():
+    """Verifica el estado del sistema."""
+    print("🔍 VERIFICANDO ESTADO DEL SISTEMA")
+    print("=" * 40)
     
-    print("🧪 PROBANDO SINCRONIZACIÓN PASO A PASO")
-    print("=" * 60)
+    # 1. Verificar servidor
+    try:
+        response = requests.get("http://localhost:6754/health", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            print(f"✅ Servidor: {data.get('status', 'unknown')}")
+            print(f"   Timestamp: {data.get('timestamp', 'unknown')}")
+        else:
+            print(f"❌ Servidor: Error {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"❌ Servidor: No disponible - {e}")
+        return False
     
-    # Cargar variables de entorno
-    load_dotenv()
+    # 2. Verificar ngrok
+    try:
+        response = requests.get("http://localhost:4040/api/tunnels", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            tunnels = data.get('tunnels', [])
+            if tunnels:
+                ngrok_url = tunnels[0].get('public_url')
+                print(f"✅ ngrok: {ngrok_url}")
+                
+                # Verificar que ngrok responde
+                ngrok_health = requests.get(f"{ngrok_url}/health", timeout=5)
+                if ngrok_health.status_code == 200:
+                    print(f"   ✅ ngrok responde correctamente")
+                else:
+                    print(f"   ⚠️ ngrok no responde correctamente")
+            else:
+                print("❌ ngrok: No hay túneles activos")
+                return False
+        else:
+            print(f"❌ ngrok: Error {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"❌ ngrok: No disponible - {e}")
+        return False
     
-    # Inicializar servicios
-    monday_token = os.getenv('MONDAY_API_KEY')
-    if not monday_token:
-        print("❌ No se encontró MONDAY_API_KEY en las variables de entorno")
-        return
+    # 3. Verificar archivo de estado
+    state_file = Path("config/sync_state.json")
+    if state_file.exists():
+        print(f"✅ Estado de sincronización: Disponible")
+        try:
+            with open(state_file, 'r') as f:
+                state_data = json.load(f)
+            total_states = len(state_data.get('sync_states', {}))
+            print(f"   Estados activos: {total_states}")
+        except Exception as e:
+            print(f"   ⚠️ Error leyendo estado: {e}")
+    else:
+        print(f"ℹ️ Estado de sincronización: No existe (se creará automáticamente)")
     
-    monday_handler = MondayAPIHandler(monday_token)
-    google_service = get_calendar_service()
-    
-    if not google_service:
-        print("❌ No se pudo conectar a Google Calendar")
-        return
-    
-    # PASO 1: Obtener datos del item de Monday.com
-    print("\n📋 PASO 1: Obtener datos del item de Monday.com")
-    print("-" * 50)
+    print()
+    return True
+
+def get_test_item():
+    """Obtiene información de un item de prueba."""
+    print("📋 SELECCIONANDO ITEM DE PRUEBA")
+    print("=" * 35)
     
     try:
-        items = monday_handler.search_items_by_name(BOARD_ID_GRABACIONES, "PRUEBA SINCRONIZACIÓN")
+        import config
+        from monday_api_handler import MondayAPIHandler
+        from dotenv import load_dotenv
+        import os
+        
+        # Cargar variables de entorno
+        load_dotenv()
+        
+        # Obtener API key de Monday
+        monday_api_key = os.getenv('MONDAY_API_KEY')
+        if not monday_api_key:
+            print("❌ No se encontró MONDAY_API_KEY en las variables de entorno")
+            return None
+        
+        # Crear handler de Monday
+        handler = MondayAPIHandler(monday_api_key)
+        
+        # Obtener items del board
+        items = handler.get_items(
+            board_id=str(config.BOARD_ID_GRABACIONES),
+            column_ids=[config.COL_GOOGLE_EVENT_ID, config.COL_FECHA, "personas1", "name"],
+            limit_per_page=5
+        )
         
         if not items:
-            print("❌ No se encontró el item 'PRUEBA SINCRONIZACIÓN' en Monday.com")
-            return
+            print("❌ No se encontraron items en Monday")
+            return None
         
-        item = items[0]
-        item_id = item.id
-        item_name = item.name
+        print(f"✅ Encontrados {len(items)} items")
+        print()
         
-        print(f"✅ Item encontrado: {item_name} (ID: {item_id})")
+        # Mostrar items disponibles
+        print("📝 ITEMS DISPONIBLES PARA PRUEBA:")
+        for i, item in enumerate(items, 1):
+            item_id = item.get('id')
+            name = item.get('name', 'Sin nombre')
+            google_event_id = None
+            
+            # Buscar Google Event ID
+            for col in item.get('column_values', []):
+                if col.get('id') == config.COL_GOOGLE_EVENT_ID:
+                    google_event_id = col.get('text', '').strip()
+                    break
+            
+            status = "✅ Con Google Event ID" if google_event_id else "⚠️ Sin Google Event ID"
+            print(f"   {i}. {name} (ID: {item_id}) - {status}")
+            if google_event_id:
+                print(f"      Google Event ID: {google_event_id}")
         
-        # Obtener fecha y Google Event ID
-        fecha_monday = "No encontrada"
-        google_event_id = "No encontrado"
+        print()
         
-        for column in item.column_values or []:
-            if column.get('id') == 'fecha56':
-                fecha_monday = column.get('text', 'No fecha')
-            elif column.get('id') == 'text_mktfdhm3':
-                google_event_id = column.get('text', 'No ID')
-        
-        print(f"📅 Fecha en Monday.com: {fecha_monday}")
-        print(f"🆔 Google Event ID: {google_event_id}")
-        
-    except Exception as e:
-        print(f"❌ Error obteniendo datos de Monday.com: {e}")
-        return
-    
-    # PASO 2: Crear evento en Google Calendar
-    print("\n📅 PASO 2: Crear evento en Google Calendar")
-    print("-" * 50)
-    
-    try:
-        # Parsear la fecha de Monday.com
-        from datetime import datetime
-        
-        if len(fecha_monday.split(':')) == 2:
-            fecha_dt = datetime.strptime(fecha_monday, '%Y-%m-%d %H:%M')
-        else:
-            fecha_dt = datetime.strptime(fecha_monday, '%Y-%m-%d %H:%M:%S')
-        
-        # Crear evento en el calendario maestro
-        event_body = {
-            'summary': item_name,
-            'description': f'Evento sincronizado desde Monday.com (ID: {item_id})',
-            'start': {
-                'dateTime': fecha_dt.isoformat(),
-                'timeZone': 'Europe/Madrid',
-            },
-            'end': {
-                'dateTime': (fecha_dt.replace(hour=fecha_dt.hour + 1)).isoformat(),
-                'timeZone': 'Europe/Madrid',
-            },
-            'extendedProperties': {
-                'private': {
-                    'monday_item_id': str(item_id),
-                    'sync_source': 'monday'
+        # Seleccionar el primer item con Google Event ID
+        for item in items:
+            google_event_id = None
+            for col in item.get('column_values', []):
+                if col.get('id') == config.COL_GOOGLE_EVENT_ID:
+                    google_event_id = col.get('text', '').strip()
+                    break
+            
+            if google_event_id:
+                return {
+                    'item_id': item.get('id'),
+                    'name': item.get('name', 'Sin nombre'),
+                    'google_event_id': google_event_id
                 }
-            }
-        }
         
-        print(f"📅 Creando evento en calendario MAESTRO...")
-        print(f"   - Nombre: {item_name}")
-        print(f"   - Fecha: {fecha_dt.isoformat()}")
-        print(f"   - Calendario: {MASTER_CALENDAR_ID}")
-        
-        # Crear el evento
-        new_event_id = create_google_event(google_service, MASTER_CALENDAR_ID, event_body)
-        
-        if new_event_id:
-            print(f"✅ Evento creado exitosamente")
-            print(f"   - ID: {new_event_id}")
-            
-            # PASO 3: Actualizar Monday.com con el nuevo ID
-            print("\n📋 PASO 3: Actualizar Monday.com con el nuevo ID")
-            print("-" * 50)
-            
-            mutation = f"""
-            mutation {{
-                change_column_value(board_id: 3324095194, item_id: {item_id}, column_id: "text_mktfdhm3", value: "{new_event_id}") {{
-                    id
-                }}
-            }}
-            """
-            
-            result = monday_handler._make_request(mutation)
-            if result and result.get('data', {}).get('change_column_value'):
-                print("✅ Google Event ID actualizado en Monday.com")
-            else:
-                print("❌ Error actualizando Google Event ID en Monday.com")
-                
-        else:
-            print("❌ Error creando evento en Google Calendar")
+        print("⚠️ No se encontró ningún item con Google Event ID")
+        return None
         
     except Exception as e:
-        print(f"❌ Error durante la creación del evento: {e}")
-        return
+        print(f"❌ Error obteniendo items: {e}")
+        return None
+
+def show_test_instructions(test_item):
+    """Muestra las instrucciones para la prueba."""
+    print("🧪 INSTRUCCIONES PARA LA PRUEBA")
+    print("=" * 35)
+    print()
     
-    # PASO 4: Verificar resultado
-    print("\n🔍 PASO 4: Verificar resultado")
-    print("-" * 50)
+    print(f"📋 ITEM SELECCIONADO:")
+    print(f"   Nombre: {test_item['name']}")
+    print(f"   Monday ID: {test_item['item_id']}")
+    print(f"   Google Event ID: {test_item['google_event_id']}")
+    print()
     
-    try:
-        # Buscar el evento en Google Calendar
-        events = google_service.events().list(
-            calendarId=MASTER_CALENDAR_ID,
-            q=item_name,
-            maxResults=1
-        ).execute()
-        
-        if events.get('items'):
-            event = events['items'][0]
-            event_id = event['id']
-            event_start = event['start'].get('dateTime', event['start'].get('date'))
-            print(f"✅ Evento encontrado en Google Calendar:")
-            print(f"   - ID: {event_id}")
-            print(f"   - Fecha: {event_start}")
-            print(f"   - Calendario: MASTER")
-        else:
-            print("❌ No se encontró el evento en Google Calendar")
-        
-    except Exception as e:
-        print(f"❌ Error verificando resultado: {e}")
+    print("🔄 PASOS PARA PROBAR SINCRONIZACIÓN:")
+    print()
+    print("1. 📅 CAMBIAR FECHA EN MONDAY:")
+    print(f"   - Ve a Monday.com")
+    print(f"   - Busca el item: '{test_item['name']}'")
+    print(f"   - Cambia la fecha en la columna de fecha")
+    print(f"   - Guarda el cambio")
+    print()
+    
+    print("2. 👀 OBSERVAR LOGS:")
+    print("   - Abre otra terminal")
+    print("   - Ejecuta: tail -f logs/sync_system.log")
+    print("   - Observa los logs cuando hagas el cambio")
+    print()
+    
+    print("3. ✅ VERIFICAR EN GOOGLE CALENDAR:")
+    print(f"   - Ve a Google Calendar")
+    print(f"   - Busca el evento correspondiente")
+    print(f"   - Verifica que la fecha se actualizó")
+    print()
+    
+    print("4. 🔄 PROBAR DIRECCIÓN INVERSA:")
+    print("   - Cambia la fecha en Google Calendar")
+    print("   - Verifica que se actualice en Monday")
+    print()
+    
+    print("⚠️  IMPORTANTE:")
+    print("   - Solo cambia la FECHA, no otros campos")
+    print("   - Espera 5-10 segundos entre cambios")
+    print("   - Observa los logs para ver el proceso")
+    print()
+    
+    return test_item
+
+def monitor_logs():
+    """Inicia el monitoreo de logs."""
+    print("📊 MONITOREO DE LOGS")
+    print("=" * 25)
+    print()
+    print("Para monitorear los logs en tiempo real:")
+    print("   tail -f logs/sync_system.log")
+    print()
+    print("Para ver solo logs de sincronización:")
+    print("   tail -f logs/sync_system.log | grep -E '(SYNC|webhook|Monday|Google)'")
+    print()
+    print("Para ver logs de errores:")
+    print("   tail -f logs/sync_system.log | grep -E '(ERROR|WARNING|BUCLE)'")
+    print()
+
+def show_debug_commands(test_item):
+    """Muestra comandos de debugging útiles."""
+    print("🔧 COMANDOS DE DEBUGGING")
+    print("=" * 25)
+    print()
+    
+    print("Ver estado de sincronización:")
+    print(f"   curl http://localhost:6754/debug/sync-state/{test_item['item_id']}")
+    print()
+    
+    print("Ver últimas sincronizaciones:")
+    print("   curl http://localhost:6754/debug/last-syncs")
+    print()
+    
+    print("Limpiar estado de sincronización (si hay problemas):")
+    print(f"   curl -X DELETE http://localhost:6754/debug/clear-state/{test_item['item_id']}")
+    print()
+    
+    print("Monitor interactivo:")
+    print("   python3 scripts/testing/monitor_sync_realtime.py --mode interactive")
+    print()
 
 def main():
-    """Función principal"""
-    print("🧪 PROBADOR DE SINCRONIZACIÓN PASO A PASO")
-    print("=" * 70)
+    """Función principal."""
+    print("🧪 PRUEBA DE SINCRONIZACIÓN MONDAY ↔ GOOGLE CALENDAR")
+    print("=" * 60)
+    print()
     
-    try:
-        probar_sincronizacion_paso_a_paso()
-    except KeyboardInterrupt:
-        print("\n👋 Prueba cancelada")
-    except Exception as e:
-        print(f"❌ Error durante la prueba: {e}")
+    # 1. Verificar estado del sistema
+    if not check_system_status():
+        print("❌ El sistema no está listo para pruebas")
+        print("   Verifica que el servidor y ngrok estén funcionando")
+        return
+    
+    # 2. Obtener item de prueba
+    test_item = get_test_item()
+    if not test_item:
+        print("❌ No se pudo obtener un item de prueba")
+        print("   Verifica que haya items en Monday con Google Event ID")
+        return
+    
+    # 3. Mostrar instrucciones
+    show_test_instructions(test_item)
+    
+    # 4. Mostrar monitoreo de logs
+    monitor_logs()
+    
+    # 5. Mostrar comandos de debugging
+    show_debug_commands(test_item)
+    
+    print("🎯 ¡LISTO PARA PROBAR!")
+    print("=" * 20)
+    print("Sigue las instrucciones anteriores para probar la sincronización.")
+    print("Si encuentras problemas, usa los comandos de debugging.")
+    print()
 
 if __name__ == "__main__":
     main()

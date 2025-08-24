@@ -5,10 +5,16 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from google_calendar_service import get_calendar_service, get_incremental_sync_events, compare_event_values
-from sync_logic import sincronizar_item_via_webhook, _obtener_item_id_por_google_event_id, update_monday_date_column_v2
+from google_calendar_service import get_calendar_service
+from sync_logic import (
+    sincronizar_item_via_webhook, 
+    _detectar_cambio_de_automatizacion,
+    generate_content_hash
+)
+# Note: Google→Monday sync functions removed for unidirectional sync
 from monday_api_handler import MondayAPIHandler
-from sync_token_manager import SyncTokenManager
+# Removed sync_token_manager - not needed for unidirectional sync
+from sync_state_manager import get_sync_state, update_sync_state
 import config
 
 # Cargar variables de entorno
@@ -18,16 +24,21 @@ load_dotenv()
 app = Flask(__name__)
 
 # Inicializar servicios globales UNA SOLA VEZ
-google_service_global = get_calendar_service()
-monday_handler_global = MondayAPIHandler(api_token=os.getenv("MONDAY_API_KEY"))
-sync_token_manager = SyncTokenManager()
+try:
+    google_service_global = get_calendar_service()
+    if google_service_global:
+        print("✅ Servicio de Google Calendar inicializado correctamente")
+    else:
+        print("⚠️  Servicio de Google Calendar no disponible")
+except Exception as e:
+    print(f"❌ Error al inicializar Google Calendar: {e}")
+    google_service_global = None
 
-# Configuración de sincronización inteligente con detección de automatización
-SYNC_COOLDOWN = config.SYNC_COOLDOWN_SECONDS  # Cooldown desde config
-AUTOMATION_DETECTION_WINDOW = config.AUTOMATION_DETECTION_WINDOW  # Ventana de detección
-CONFLICT_RESOLUTION_WINDOW = config.CONFLICT_RESOLUTION_WINDOW  # Ventana de resolución de conflictos
-last_sync_times = {}  # Cache de últimos tiempos de sincronización
-sync_origin = {}  # Origen de la última sincronización por item
+monday_handler_global = MondayAPIHandler(api_token=os.getenv("MONDAY_API_KEY"))
+# Removed sync_token_manager - not needed for unidirectional sync
+
+# Configuración del nuevo sistema anti-bucles
+print("🚀 Inicializando sistema anti-bucles con sync_state_manager y detección de automatización")
 
 @app.route('/')
 def home():
@@ -43,6 +54,150 @@ def health_check():
         'service': 'Stupendastic Sync Server',
         'version': '1.0.0'
     }), 200
+
+# ============================================================================
+# ENDPOINTS DE DEBUGGING
+# ============================================================================
+
+@app.route('/debug/sync-state/<item_id>', methods=['GET'])
+def debug_sync_state(item_id):
+    """Muestra el estado de sincronización para un item específico."""
+    try:
+        # Buscar todos los estados que contengan este item_id
+        from sync_state_manager import get_all_sync_keys
+        
+        all_keys = get_all_sync_keys()
+        item_states = {}
+        
+        for key in all_keys:
+            if key.startswith(f"{item_id}_"):
+                event_id = key.replace(f"{item_id}_", "")
+                state = get_sync_state(item_id, event_id)
+                if state:
+                    item_states[event_id] = state
+        
+        if not item_states:
+            return jsonify({
+                'item_id': item_id,
+                'message': 'No se encontró estado de sincronización para este item',
+                'states': {}
+            }), 200
+        
+        return jsonify({
+            'item_id': item_id,
+            'states': item_states,
+            'total_states': len(item_states)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'error': f'Error obteniendo estado de sincronización: {str(e)}'
+        }), 500
+
+@app.route('/debug/last-syncs', methods=['GET'])
+def debug_last_syncs():
+    """Muestra las últimas 10 sincronizaciones."""
+    try:
+        from sync_state_manager import get_sync_statistics
+        
+        # Obtener estadísticas
+        stats = get_sync_statistics()
+        
+        # Obtener todos los estados
+        from sync_state_manager import get_all_sync_keys
+        
+        all_keys = get_all_sync_keys()
+        all_states = []
+        
+        for key in all_keys:
+            item_id, event_id = key.split('_', 1)
+            state = get_sync_state(item_id, event_id)
+            if state:
+                all_states.append({
+                    'key': key,
+                    'item_id': item_id,
+                    'event_id': event_id,
+                    'state': state
+                })
+        
+        # Ordenar por timestamp de última sincronización
+        all_states.sort(
+            key=lambda x: x['state'].get('last_sync_timestamp', 0),
+            reverse=True
+        )
+        
+        # Tomar los últimos 10
+        last_syncs = all_states[:10]
+        
+        return jsonify({
+            'statistics': stats,
+            'last_syncs': last_syncs,
+            'total_states': len(all_states)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'error': f'Error obteniendo últimas sincronizaciones: {str(e)}'
+        }), 500
+
+@app.route('/debug/clear-state/<item_id>', methods=['DELETE'])
+def debug_clear_state(item_id):
+    """Limpia el estado de sincronización para un item específico (para testing)."""
+    try:
+        from sync_state_manager import get_all_sync_keys, reset_sync_state
+        
+        # Buscar todos los estados que contengan este item_id
+        all_keys = get_all_sync_keys()
+        cleared_states = []
+        
+        for key in all_keys:
+            if key.startswith(f"{item_id}_"):
+                event_id = key.replace(f"{item_id}_", "")
+                # Resetear estado específico
+                reset_sync_state(item_id, event_id)
+                cleared_states.append(event_id)
+        
+        if not cleared_states:
+            return jsonify({
+                'item_id': item_id,
+                'message': 'No se encontraron estados para limpiar',
+                'cleared_states': []
+            }), 200
+        
+        return jsonify({
+            'item_id': item_id,
+            'message': f'Estado limpiado para {len(cleared_states)} eventos',
+            'cleared_states': cleared_states
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'error': f'Error limpiando estado: {str(e)}'
+        }), 500
+
+@app.route('/debug/sync-monitor', methods=['GET'])
+def debug_sync_monitor():
+    """Endpoint para monitorear sincronizaciones en tiempo real."""
+    try:
+        # Crear monitor temporal para esta sesión
+        from scripts.testing.test_sync_system import SyncMonitor
+        
+        # Por ahora, retornar información básica del sistema
+        from sync_state_manager import get_sync_statistics
+        
+        stats = get_sync_statistics()
+        
+        return jsonify({
+            'monitor_status': 'active',
+            'statistics': stats,
+            'timestamp': datetime.now().isoformat(),
+            'message': 'Monitor de sincronización activo'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'error': f'Error en monitor de sincronización: {str(e)}'
+        }), 500
 
 @app.route('/webhook-test', methods=['GET', 'POST'])
 def webhook_test():
@@ -65,6 +220,7 @@ def webhook_test():
 def handle_monday_webhook():
     """
     Webhook de Monday.com - Sincronización inteligente Monday → Google.
+    Usa el nuevo sistema anti-bucles con sync_state_manager y detección de automatización.
     """
     # Monday envía un 'challenge' la primera vez que configuras un webhook.
     if 'challenge' in request.json:
@@ -92,194 +248,101 @@ def handle_monday_webhook():
         print("⚠️  No se pudo extraer el ID del item del webhook")
         return jsonify({'message': 'Webhook recibido sin item_id'}), 200
     
-    # Verificar cooldown y origen de sincronización
-    current_time = time.time()
-    
-    # Generar UUID único para este cambio
-    change_uuid = str(uuid.uuid4())
-    
-    # Verificar cooldown solo si no tenemos un UUID único
-    # El sistema de UUIDs maneja la detección de duplicados de forma más precisa
-    if item_id in last_sync_times:
-        time_since_last = current_time - last_sync_times[item_id]
-        if time_since_last < SYNC_COOLDOWN:
-            print(f"⚠️  Item {item_id} sincronizado recientemente ({time_since_last:.1f}s). Saltando...")
-            return jsonify({'message': 'Sincronización en cooldown'}), 200
-    
-    # ACTUALIZAR last_sync_times INMEDIATAMENTE para prevenir bucles
-    last_sync_times[item_id] = current_time
-    
-    # Verificar si el último cambio fue desde Google
-    if sync_origin.get(item_id) == 'google':
-        print(f"🔄 Último cambio fue desde Google. Sincronizando Monday → Google para item {item_id}")
-    else:
-        print(f"🔄 Sincronizando Monday → Google para item {item_id}")
-    
-    # Generar UUID único para este cambio
-    change_uuid = str(uuid.uuid4())
+    print(f"🔄 Procesando webhook para item {item_id}")
     
     try:
+        # 1. OBTENER DATOS DEL ITEM DE MONDAY
+        from sync_logic import parse_monday_item
+        
+        # Obtener item específico de Monday usando el ID
+        item_data = monday_handler_global.get_item_by_id(
+            board_id=str(config.BOARD_ID_GRABACIONES),
+            item_id=str(item_id),
+            column_ids=[config.COL_GOOGLE_EVENT_ID, config.COL_FECHA, "personas1", "name"]
+        )
+        
+        if not item_data:
+            print(f"❌ No se pudo obtener datos del item {item_id}")
+            return jsonify({'message': 'Item no encontrado'}), 200
+        
+        # Procesar item de Monday
+        item_procesado = parse_monday_item(item_data)
+        google_event_id = item_procesado.get('google_event_id')
+        
+        # No devolvemos aquí: si no hay Google Event ID, la lógica de sincronización lo creará
+        if not google_event_id:
+            print(f"⚠️  Item {item_id} no tiene Google Event ID asociado — se creará uno si corresponde")
+        
+        # 2. OBTENER ESTADO DE SINCRONIZACIÓN (solo si ya existe Google Event ID)
+        sync_state = None
+        if google_event_id:
+            sync_state = get_sync_state(str(item_id), google_event_id)
+        
+        # 3. GENERAR HASH DEL CONTENIDO ACTUAL
+        current_content = {
+            'name': item_procesado.get('name', ''),
+            'fecha_inicio': item_procesado.get('fecha_inicio', ''),
+            'operario': item_procesado.get('operario', '')
+        }
+        current_hash = generate_content_hash(current_content)
+        
+        print(f"📊 Hash del contenido actual: {current_hash}")
+        
+        # 4. VERIFICAR SI ES UN ECO
+        if sync_state and sync_state.get('monday_content_hash') == current_hash:
+            print("🔄 Eco detectado - contenido idéntico, ignorando")
+            return jsonify({'status': 'echo_ignored', 'message': 'Eco detectado'}), 200
+        
+        # 5. VERIFICAR SI FUE CAMBIO DE AUTOMATIZACIÓN
+        if _detectar_cambio_de_automatizacion(str(item_id), monday_handler_global):
+            print("🤖 Cambio de automatización detectado, ignorando")
+            return jsonify({'status': 'automation_ignored', 'message': 'Cambio de automatización detectado'}), 200
+        
+        # 6. VERIFICAR SERVICIOS DISPONIBLES
+        if not google_service_global:
+            print("⚠️  Servicio de Google Calendar no disponible, omitiendo sincronización")
+            return jsonify({
+                'status': 'service_unavailable',
+                'message': 'Servicio de Google Calendar no disponible'
+            }), 200
+        
+        # 7. PROCEDER CON SINCRONIZACIÓN
+        print(f"🚀 Iniciando sincronización Monday → Google para item {item_id}")
+        
         success = sincronizar_item_via_webhook(
             item_id, 
             monday_handler=monday_handler_global,
             google_service=google_service_global,
-            change_uuid=change_uuid
+            change_uuid=str(uuid.uuid4())
         )
         
+        # 7. ACTUALIZAR ESTADO SI FUE EXITOSO
         if success:
             print(f"✅ Sincronización Monday → Google completada para item {item_id}")
-            sync_origin[item_id] = 'monday'
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Sincronización completada',
+                'item_id': item_id
+            }), 200
         else:
             print(f"❌ Error en sincronización Monday → Google para item {item_id}")
+            return jsonify({
+                'status': 'error',
+                'message': 'Error en sincronización'
+            }), 200
             
     except Exception as e:
-        print(f"❌ Error inesperado durante sincronización: {e}")
-    
-    return jsonify({'message': 'Webhook recibido con éxito'}), 200
+        print(f"❌ Error inesperado durante procesamiento del webhook: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'message': f'Error interno: {str(e)}'
+        }), 200
 
-@app.route('/google-webhook', methods=['POST'])
-def handle_google_webhook():
-    """
-    Webhook de Google Calendar - Sincronización inteligente Google → Monday.
-    """
-    print("\n--- ¡Notificación Push de Google Calendar Recibida! ---")
-    
-    # Extraer información del evento cambiado
-    try:
-        # 1. Cargar el mapeo de canales
-        channel_map_file = "config/channels/config/channels/google_channel_map.json"
-        if not os.path.exists(channel_map_file):
-            print("❌ Error: Archivo config/channels/google_channel_map.json no encontrado")
-            return '', 200
-        
-        with open(channel_map_file, 'r', encoding='utf-8') as f:
-            channel_map = json.load(f)
-        
-        # 2. Obtener el channel_id
-        channel_id = request.headers.get('X-Goog-Channel-Id')
-        if not channel_id:
-            print("❌ No se pudo obtener el channel_id")
-            return '', 200
-        
-        # 3. Buscar el calendar_id_real en el mapeo
-        calendar_id_real = channel_map.get(channel_id)
-        if not calendar_id_real:
-            print(f"❌ Channel ID '{channel_id}' no encontrado en el mapeo")
-            return '', 200
-        
-        print(f"📅 Calendar ID: {calendar_id_real}")
-        
-        # 4. Determinar si es el calendario maestro o un calendario personal
-        is_master_calendar = calendar_id_real == config.MASTER_CALENDAR_ID
-        is_personal_calendar = calendar_id_real in [profile.get('calendar_id') for profile in config.FILMMAKER_PROFILES if profile.get('calendar_id')]
-        
-        if is_master_calendar:
-            print(f"🎯 Calendario MAESTRO detectado")
-        elif is_personal_calendar:
-            print(f"👤 Calendario PERSONAL detectado")
-        else:
-            print(f"⚠️  Calendario desconocido: {calendar_id_real}")
-            return '', 200
-        
-        # 4. Obtener eventos actualizados usando sincronización incremental
-        if google_service_global:
-            try:
-                # Obtener sync token actual para este calendario
-                current_sync_token = sync_token_manager.get_sync_token(calendar_id_real)
-                
-                # Obtener eventos usando sincronización incremental
-                eventos_cambiados, next_sync_token = get_incremental_sync_events(
-                    google_service_global, 
-                    calendar_id_real, 
-                    current_sync_token
-                )
-                
-                if not eventos_cambiados:
-                    print("ℹ️  No se encontraron eventos actualizados recientemente")
-                    return '', 200
-                
-                # Guardar el nuevo sync token
-                if next_sync_token:
-                    sync_token_manager.set_sync_token(calendar_id_real, next_sync_token)
-                
-                print(f"🔄 Procesando {len(eventos_cambiados)} eventos actualizados...")
-                
-                # 5. Procesar cada evento cambiado
-                for evento_cambiado in eventos_cambiados:
-                    event_id = evento_cambiado.get('id')
-                    event_summary = evento_cambiado.get('summary', 'Sin título')
-                    
-                    print(f"📋 Procesando evento: '{event_summary}' (ID: {event_id})")
-                    
-                    # Verificar cooldown
-                    current_time = time.time()
-                    if event_id in last_sync_times:
-                        time_since_last = current_time - last_sync_times[event_id]
-                        if time_since_last < SYNC_COOLDOWN:
-                            print(f"  ⚠️  Evento {event_id} procesado recientemente. Saltando...")
-                            continue
-                    
-                    # ACTUALIZAR last_sync_times INMEDIATAMENTE para prevenir bucles
-                    last_sync_times[event_id] = current_time
-                    
-                    # 6. Usar la función de sincronización apropiada según el tipo de calendario
-                    try:
-                        if is_master_calendar:
-                            print(f"  🔄 Sincronizando desde calendario MAESTRO...")
-                            
-                            # Usar la función especializada para sincronización desde Google
-                            from sync_logic import sincronizar_desde_google_calendar
-                            
-                            # Generar UUID único para este cambio
-                            change_uuid = str(uuid.uuid4())
-                            
-                            success = sincronizar_desde_google_calendar(
-                                evento_cambiado=evento_cambiado,
-                                google_service=google_service_global,
-                                monday_handler=monday_handler_global,
-                                change_uuid=change_uuid
-                            )
-                            
-                            if success:
-                                print(f"  ✅ Sincronización desde calendario maestro completada")
-                            else:
-                                print(f"  ❌ Error en sincronización desde calendario maestro")
-                                
-                        elif is_personal_calendar:
-                            print(f"  🔄 Sincronizando desde calendario PERSONAL...")
-                            
-                            # Usar la función especializada para sincronización desde calendario personal
-                            from sync_logic import sincronizar_desde_calendario_personal
-                            
-                            success = sincronizar_desde_calendario_personal(
-                                evento_cambiado=evento_cambiado,
-                                calendar_id=calendar_id_real,
-                                google_service=google_service_global,
-                                monday_handler=monday_handler_global
-                            )
-                            
-                            if success:
-                                print(f"  ✅ Sincronización desde calendario personal completada")
-                            else:
-                                print(f"  ❌ Error en sincronización desde calendario personal")
-                        else:
-                            print(f"  ⚠️  Tipo de calendario no reconocido")
-                            success = False
-                            
-                    except Exception as e:
-                        print(f"  ❌ Error procesando sincronización: {e}")
-                
-                print(f"✅ Procesamiento completado para {len(eventos_cambiados)} eventos")
-                    
-            except Exception as e:
-                print(f"❌ Error al procesar eventos actualizados: {e}")
-        else:
-            print("❌ Servicio de Google Calendar no disponible")
-            
-    except Exception as e:
-        print(f"❌ Error procesando webhook de Google: {e}")
-    
-    return '', 200
+# Google webhook endpoint REMOVED for unidirectional sync
+# System now only supports Monday → Google synchronization
 
 if __name__ == '__main__':
     app.run(debug=True, port=6754) 

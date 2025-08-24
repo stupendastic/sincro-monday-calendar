@@ -22,7 +22,8 @@ import time
 import logging
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
+import threading
 
 @dataclass
 class ColumnInfo:
@@ -40,7 +41,7 @@ class ItemInfo:
     subitems: List[Dict] = None
 
 class MondayAPIHandler:
-    """Handler centralizado para Monday.com API con mejores prácticas"""
+    """Handler centralizado para Monday.com API con mejores prácticas y caché optimizado"""
     
     def __init__(self, api_token: str, logger: Optional[logging.Logger] = None):
         self.API_TOKEN = api_token
@@ -57,6 +58,15 @@ class MondayAPIHandler:
         self.MAX_RETRIES = 3
         self.BASE_WAIT_TIME = 30
         self.COMPLEXITY_WAIT_TIME = 60
+        
+        # Sistema de caché en memoria para búsquedas frecuentes
+        self._cache_lock = threading.RLock()
+        self._item_to_google_cache = {}  # {item_id: (google_event_id, timestamp)}
+        self._google_to_item_cache = {}  # {google_event_id: (item_id, timestamp)}
+        self._cache_ttl = 300  # 5 minutos TTL
+        
+        # Límites de optimización
+        self.MAX_SCAN_ITEMS = 200  # Máximo items escaneados en búsquedas
         
         # Tipos de columna soportados con sus configuraciones
         self.COLUMN_TYPES = {
@@ -86,6 +96,77 @@ class MondayAPIHandler:
             logger.addHandler(handler)
             logger.setLevel(logging.INFO)
         return logger
+    
+    def _is_cache_valid(self, timestamp: float) -> bool:
+        """Verificar si un timestamp de caché es válido"""
+        return (time.time() - timestamp) < self._cache_ttl
+    
+    def _get_from_cache(self, cache_dict: dict, key: str) -> Optional[str]:
+        """Obtener valor del caché si es válido"""
+        with self._cache_lock:
+            if key in cache_dict:
+                value, timestamp = cache_dict[key]
+                if self._is_cache_valid(timestamp):
+                    self.logger.debug(f"Cache hit para {key}")
+                    return value
+                else:
+                    # Limpiar entrada expirada
+                    del cache_dict[key]
+                    self.logger.debug(f"Cache expirado para {key}")
+        return None
+    
+    def _update_cache(self, item_id: str, google_event_id: str):
+        """Actualizar ambos cachés con nueva asociación"""
+        with self._cache_lock:
+            current_time = time.time()
+            self._item_to_google_cache[item_id] = (google_event_id, current_time)
+            self._google_to_item_cache[google_event_id] = (item_id, current_time)
+            self.logger.debug(f"Cache actualizado: {item_id} ↔ {google_event_id}")
+    
+    def _clear_cache_for_item(self, item_id: str):
+        """Limpiar caché para un item específico"""
+        with self._cache_lock:
+            # Encontrar google_event_id asociado
+            if item_id in self._item_to_google_cache:
+                google_event_id, _ = self._item_to_google_cache[item_id]
+                del self._item_to_google_cache[item_id]
+                if google_event_id in self._google_to_item_cache:
+                    del self._google_to_item_cache[google_event_id]
+                self.logger.debug(f"Cache limpiado para item {item_id}")
+    
+    def invalidate_cache(self, item_id: Optional[str] = None):
+        """Invalidar caché completo o para un item específico"""
+        with self._cache_lock:
+            if item_id:
+                self._clear_cache_for_item(item_id)
+            else:
+                self._item_to_google_cache.clear()
+                self._google_to_item_cache.clear()
+                self.logger.info("Cache completo invalidado")
+    
+    def _clean_expired_cache(self):
+        """Limpiar entradas expiradas del caché"""
+        with self._cache_lock:
+            current_time = time.time()
+            
+            # Limpiar cache item->google
+            expired_items = [
+                key for key, (_, timestamp) in self._item_to_google_cache.items()
+                if (current_time - timestamp) >= self._cache_ttl
+            ]
+            for key in expired_items:
+                del self._item_to_google_cache[key]
+            
+            # Limpiar cache google->item
+            expired_google = [
+                key for key, (_, timestamp) in self._google_to_item_cache.items()
+                if (current_time - timestamp) >= self._cache_ttl
+            ]
+            for key in expired_google:
+                del self._google_to_item_cache[key]
+            
+            if expired_items or expired_google:
+                self.logger.debug(f"Cache limpiado: {len(expired_items)} items, {len(expired_google)} google events")
     
     def _make_request(self, query: str, variables: Optional[Dict] = None, max_retries: Optional[int] = None) -> Optional[Dict]:
         """Realizar petición GraphQL con manejo de errores y reintentos"""
@@ -516,9 +597,71 @@ class MondayAPIHandler:
         self.logger.info(f"Obtenidos {len(all_items)} items totales con fragmentos en línea")
         return all_items
     
+    def get_item_by_id(self, board_id: str, item_id: str, column_ids: Optional[List[str]] = None) -> Optional[Dict]:
+        """Obtiene un item específico por su ID"""
+        self.logger.info(f"Obteniendo item específico {item_id} del tablero {board_id}")
+        
+        column_ids = column_ids or []
+        
+        column_query = ''
+        if column_ids:
+            column_query = f'''
+            column_values(ids: {json.dumps(column_ids)}) {{
+                id
+                text
+                value
+                type
+                ... on BoardRelationValue {{
+                    linked_item_ids
+                }}
+                ... on MirrorValue {{
+                    display_value
+                }}
+            }}'''
+        else:
+            column_query = '''
+            column_values {
+                id
+                text
+                value
+                type
+                ... on BoardRelationValue {
+                    linked_item_ids
+                }
+                ... on MirrorValue {
+                    display_value
+                }
+            }'''
+        
+        query = f'''
+        query($itemId: [ID!]!) {{
+            items(ids: $itemId) {{
+                id
+                name
+                {column_query}
+            }}
+        }}
+        '''
+        
+        variables = {'itemId': item_id}
+        data = self._make_request(query, variables)
+        
+        if not data or not data.get('data', {}).get('items'):
+            self.logger.error(f"No se pudo obtener item {item_id}")
+            return None
+        
+        items_data = data['data']['items']
+        if not items_data:
+            self.logger.warning(f"Lista de items vacía para item {item_id}")
+            return None
+        
+        item_data = items_data[0]
+        self.logger.info(f"Item {item_id} obtenido exitosamente")
+        return item_data
+    
     def update_column_value(self, item_id: str, board_id: str, column_id: str, 
-                           value: Any, column_type: str) -> bool:
-        """Actualizar valor de columna según su tipo con manejo robusto"""
+                           value: Any, column_type: str, google_event_column_id: Optional[str] = None) -> bool:
+        """Actualizar valor de columna según su tipo con manejo robusto y gestión de caché"""
         
         try:
             mutation = self._build_update_mutation(item_id, board_id, column_id, value, column_type)
@@ -529,6 +672,18 @@ class MondayAPIHandler:
             data = self._make_request(mutation, max_retries=self.MAX_RETRIES)
             
             if data and 'data' in data:
+                # Si se está actualizando la columna de Google Event ID, actualizar caché
+                if google_event_column_id and column_id == google_event_column_id and value:
+                    google_event_id = str(value).strip().replace('"', '').replace("'", "")
+                    if google_event_id:
+                        self._update_cache(item_id, google_event_id)
+                        self.logger.debug(f"Cache actualizado tras update: {item_id} ↔ {google_event_id}")
+                
+                # Si se actualiza cualquier otro campo del item, limpiar su caché
+                elif google_event_column_id and column_id != google_event_column_id:
+                    self._clear_cache_for_item(item_id)
+                    self.logger.debug(f"Cache limpiado tras update de {column_id} en item {item_id}")
+                
                 self.logger.debug(f"Elemento {item_id} actualizado exitosamente")
                 return True
             else:
@@ -544,7 +699,90 @@ class MondayAPIHandler:
         """Construir mutación de actualización según el tipo de columna"""
         
         try:
-            if column_type in ['color', 'status'] and value is not None:  # Status columns
+            if column_type == 'date':
+                # MANEJO ESPECIAL PARA COLUMNAS DE FECHA
+                # Monday espera un objeto JSON con 'date' y opcionalmente 'time'
+                
+                if value is None:
+                    # Limpiar la fecha
+                    return f'''
+                    mutation {{
+                        change_simple_column_value(
+                            item_id: {item_id}, 
+                            board_id: {board_id}, 
+                            column_id: "{column_id}", 
+                            value: ""
+                        ) {{
+                            id
+                        }}
+                    }}
+                    '''
+                
+                # DETECTAR SI EL VALOR YA VIENE SERIALIZADO
+                if isinstance(value, str):
+                    # Verificar si ya es un JSON string con doble serialización
+                    if value.startswith('"') and value.endswith('"') and '\\"' in value:
+                        # Ya viene con doble serialización, limpiarlo
+                        try:
+                            # Remover las comillas externas y deserializar
+                            cleaned_value = value[1:-1]  # Remover comillas externas
+                            # Reemplazar las comillas escapadas
+                            cleaned_value = cleaned_value.replace('\\"', '"')
+                            date_obj = json.loads(cleaned_value)
+                        except json.JSONDecodeError:
+                            # Si no es JSON válido, asumir que es solo la fecha
+                            date_obj = {"date": value}
+                    elif value.startswith('"') and value.endswith('"'):
+                        # Es un JSON string simple con comillas externas
+                        try:
+                            # Remover las comillas externas y deserializar
+                            cleaned_value = value[1:-1]  # Remover comillas externas
+                            date_obj = json.loads(cleaned_value)
+                        except json.JSONDecodeError:
+                            # Si no es JSON válido, asumir que es solo la fecha
+                            date_obj = {"date": value}
+                    elif value.startswith('{') and value.endswith('}'):
+                        # Es un JSON string sin comillas externas
+                        try:
+                            date_obj = json.loads(value)
+                        except json.JSONDecodeError:
+                            # Si no es JSON válido, asumir que es solo la fecha
+                            date_obj = {"date": value}
+                    else:
+                        # Es un string simple, asumir que es solo la fecha
+                        date_obj = {"date": value}
+                elif isinstance(value, dict):
+                    # Ya viene como diccionario con 'date' y posiblemente 'time'
+                    date_obj = value
+                else:
+                    # Intentar convertir a string
+                    date_obj = {"date": str(value)}
+                
+                # Asegurar que tenemos el campo 'date'
+                if 'date' not in date_obj:
+                    self.logger.error(f"Objeto de fecha sin campo 'date': {date_obj}")
+                    return None
+                
+                # Serializar UNA SOLA VEZ para change_column_value
+                date_json = json.dumps(date_obj)
+                
+                # IMPORTANTE: Escapar las comillas para la mutación GraphQL
+                escaped_date_json = date_json.replace('"', '\\"')
+                
+                return f'''
+                mutation {{
+                    change_column_value(
+                        item_id: {item_id}, 
+                        board_id: {board_id}, 
+                        column_id: "{column_id}", 
+                        value: "{escaped_date_json}"
+                    ) {{
+                        id
+                    }}
+                }}
+                '''
+            
+            elif column_type in ['color', 'status'] and value is not None:  # Status columns
                 # Extraer index del status
                 if isinstance(value, dict):
                     if 'label' in value and 'index' in value['label']:
@@ -812,3 +1050,245 @@ class MondayAPIHandler:
     def get_column_type_info(self, column_type: str) -> Optional[Dict]:
         """Obtener información sobre un tipo de columna"""
         return self.COLUMN_TYPES.get(column_type)
+    
+    def get_item_by_column_value(self, board_id: str, column_id: str, column_value: str, 
+                                limit: int = 1) -> Optional[ItemInfo]:
+        """
+        Buscar item por valor de columna usando la query optimizada items_page_by_column_values.
+        Esta es la búsqueda más eficiente de Monday.com.
+        
+        Args:
+            board_id: ID del tablero
+            column_id: ID de la columna a buscar
+            column_value: Valor exacto a buscar
+            limit: Límite de resultados (default: 1 para encontrar el primer match)
+            
+        Returns:
+            Primer ItemInfo que coincida exactamente, o None si no se encuentra
+        """
+        self.logger.debug(f"Búsqueda optimizada en tablero {board_id}, columna {column_id}, valor '{column_value}'")
+        
+        # Limpiar caché expirado antes de la búsqueda
+        self._clean_expired_cache()
+        
+        query = '''
+        query($boardId: ID!, $columnId: String!, $columnValue: String!, $limit: Int!) {
+            items_page_by_column_values(
+                board_id: $boardId,
+                columns: [{
+                    column_id: $columnId,
+                    column_values: [$columnValue]
+                }],
+                limit: $limit
+            ) {
+                items {
+                    id
+                    name
+                    column_values {
+                        id
+                        text
+                        value
+                        type
+                        ... on BoardRelationValue {
+                            linked_item_ids
+                        }
+                        ... on MirrorValue {
+                            display_value
+                        }
+                    }
+                }
+            }
+        }
+        '''
+        
+        variables = {
+            'boardId': board_id,
+            'columnId': column_id,
+            'columnValue': column_value,
+            'limit': limit
+        }
+        
+        data = self._make_request(query, variables)
+        
+        if not data or not data.get('data', {}).get('items_page_by_column_values'):
+            self.logger.debug(f"No se encontraron items con {column_id}='{column_value}'")
+            return None
+        
+        items_data = data['data']['items_page_by_column_values']['items']
+        
+        if not items_data:
+            self.logger.debug(f"Lista de items vacía para {column_id}='{column_value}'")
+            return None
+        
+        # Retornar el primer match
+        first_item = items_data[0]
+        item = ItemInfo(
+            id=first_item['id'],
+            name=first_item['name'],
+            column_values=first_item.get('column_values', []),
+            subitems=[]  # Esta query no incluye subitems por optimización
+        )
+        
+        self.logger.debug(f"Item encontrado: {item.name} (ID: {item.id})")
+        return item
+    
+    def get_item_id_by_google_event_id(self, board_id: str, google_event_column_id: str, 
+                                      google_event_id: str) -> Optional[str]:
+        """
+        Búsqueda ultra-optimizada de item_id por Google Event ID.
+        
+        Estrategia de optimización:
+        1. Revisar caché primero (TTL: 5 minutos)
+        2. Usar items_page_by_column_values (query más eficiente)
+        3. Solo como último recurso hacer búsqueda paginada (máximo 200 items)
+        
+        Args:
+            board_id: ID del tablero de Monday.com
+            google_event_column_id: ID de la columna que contiene Google Event ID
+            google_event_id: Google Event ID a buscar
+            
+        Returns:
+            item_id si se encuentra, None en caso contrario
+        """
+        # Limpiar Google Event ID
+        cleaned_event_id = google_event_id.strip().replace('"', '').replace("'", "")
+        
+        # 1. REVISAR CACHÉ PRIMERO
+        cached_item_id = self._get_from_cache(self._google_to_item_cache, cleaned_event_id)
+        if cached_item_id:
+            self.logger.debug(f"🚀 Cache hit: {cleaned_event_id} → {cached_item_id}")
+            return cached_item_id
+        
+        self.logger.debug(f"🔍 Búsqueda optimizada para Google Event ID: {cleaned_event_id}")
+        
+        # 2. USAR QUERY OPTIMIZADA items_page_by_column_values
+        item = self.get_item_by_column_value(board_id, google_event_column_id, cleaned_event_id, limit=1)
+        
+        if item:
+            # Actualizar caché con el resultado
+            self._update_cache(item.id, cleaned_event_id)
+            self.logger.info(f"✅ Item encontrado con query optimizada: {item.name} (ID: {item.id})")
+            return item.id
+        
+        # 3. ÚLTIMO RECURSO: Búsqueda paginada limitada (máximo 200 items)
+        self.logger.warning(f"⚠️  Query optimizada no encontró resultados. Fallback a búsqueda paginada...")
+        
+        return self._fallback_paginated_search(board_id, google_event_column_id, cleaned_event_id)
+    
+    def _fallback_paginated_search(self, board_id: str, column_id: str, 
+                                  search_value: str) -> Optional[str]:
+        """
+        Búsqueda paginada como último recurso, limitada a MAX_SCAN_ITEMS.
+        """
+        query = f'''
+        query($boardId: [ID!]!, $limit: Int!, $cursor: String) {{
+            boards(ids: $boardId) {{
+                items_page(limit: $limit, cursor: $cursor) {{
+                    cursor
+                    items {{
+                        id
+                        name
+                        column_values(ids: ["{column_id}"]) {{
+                            id
+                            text
+                        }}
+                    }}
+                }}
+            }}
+        }}
+        '''
+        
+        scanned_items = 0
+        cursor = None
+        
+        while scanned_items < self.MAX_SCAN_ITEMS:
+            variables = {'boardId': board_id, 'limit': min(100, self.MAX_SCAN_ITEMS - scanned_items)}
+            if cursor:
+                variables['cursor'] = cursor
+            
+            data = self._make_request(query, variables)
+            
+            if not data or not data.get('data', {}).get('boards'):
+                break
+            
+            board_data = data['data']['boards'][0]
+            if not board_data or not board_data.get('items_page'):
+                break
+            
+            items_page = board_data['items_page']
+            items_data = items_page['items']
+            
+            # Buscar en esta página
+            for item in items_data:
+                for column in item.get('column_values', []):
+                    if column.get('id') == column_id:
+                        stored_value = column.get('text', '').strip()
+                        if stored_value == search_value:
+                            item_id = item['id']
+                            # Actualizar caché
+                            self._update_cache(item_id, search_value)
+                            self.logger.info(f"✅ Item encontrado en fallback: {item.get('name')} (ID: {item_id})")
+                            return item_id
+            
+            scanned_items += len(items_data)
+            cursor = items_page.get('cursor')
+            
+            if not cursor:
+                break
+            
+            self.logger.debug(f"📄 Escaneados {scanned_items}/{self.MAX_SCAN_ITEMS} items en fallback")
+        
+        self.logger.warning(f"❌ No se encontró item después de escanear {scanned_items} items")
+        return None
+    
+    def get_google_event_id_by_item_id(self, board_id: str, google_event_column_id: str, 
+                                      item_id: str) -> Optional[str]:
+        """
+        Búsqueda optimizada de Google Event ID por item_id usando caché.
+        
+        Args:
+            board_id: ID del tablero de Monday.com
+            google_event_column_id: ID de la columna que contiene Google Event ID
+            item_id: item_id a buscar
+            
+        Returns:
+            google_event_id si se encuentra, None en caso contrario
+        """
+        # 1. REVISAR CACHÉ PRIMERO
+        cached_google_id = self._get_from_cache(self._item_to_google_cache, item_id)
+        if cached_google_id:
+            self.logger.debug(f"🚀 Cache hit: {item_id} → {cached_google_id}")
+            return cached_google_id
+        
+        # 2. CONSULTAR ITEM ESPECÍFICO
+        query = f'''
+        query($itemId: [ID!]!) {{
+            items(ids: $itemId) {{
+                id
+                name
+                column_values(ids: ["{google_event_column_id}"]) {{
+                    id
+                    text
+                }}
+            }}
+        }}
+        '''
+        
+        variables = {'itemId': item_id}
+        data = self._make_request(query, variables)
+        
+        if data and data.get('data', {}).get('items'):
+            items = data['data']['items']
+            if items:
+                item = items[0]
+                for column in item.get('column_values', []):
+                    if column.get('id') == google_event_column_id:
+                        google_event_id = column.get('text', '').strip()
+                        if google_event_id:
+                            # Actualizar caché
+                            self._update_cache(item_id, google_event_id)
+                            self.logger.debug(f"✅ Google Event ID encontrado: {google_event_id}")
+                            return google_event_id
+        
+        self.logger.debug(f"❌ No se encontró Google Event ID para item {item_id}")
+        return None

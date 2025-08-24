@@ -1,43 +1,31 @@
-# Sincro Monday Calendar - Sistema de Sincronización Inteligente
+# Monday → Google Calendar Sync (Unidirectional)
 
-Sistema avanzado de sincronización bidireccional entre Monday.com y Google Calendar con arquitectura "Master-Copia" para gestión de múltiples filmmakers.
+Sistema de sincronización **unidireccional** Monday.com → Google Calendar.
 
-## 🎯 Descripción General
+## 🎯 Sistema Actual (v4.0 - Clean)
 
-Este proyecto implementa un sistema de sincronización inteligente que mantiene perfectamente sincronizados los eventos de Monday.com con Google Calendar, utilizando una arquitectura "Master-Copia" que permite asignar eventos a múltiples filmmakers sin conflictos.
+- ✅ **Monday → Google**: Sincronización completa y optimizada
+- ❌ **Google → Monday**: DESHABILITADO (sistema unidireccional)
+- 📊 **Monitoreo**: Detección pasiva de cambios manuales
+- 🧹 **Proyecto**: Limpio y organizado para producción
 
-### Características Principales
+## 🔄 Cambio Importante: Sistema Unidireccional
 
-- ✅ **Arquitectura Master-Copia**: Un evento maestro central + copias automáticas para cada filmmaker
-- ✅ **Sincronización Bidireccional Perfecta**: Monday ↔ Google Calendar (validada con pruebas)
-- ✅ **Funciones Generalizadas**: Google Calendar API optimizada con separación de responsabilidades
-- ✅ **Función Adaptadora**: Conversión automática de datos Monday → formato Google
-- ✅ **Arquitectura a Prueba de Bucles**: Puertas de seguridad que evitan sincronizaciones innecesarias
-- ✅ **Webhooks Automáticos**: Respuesta inmediata a cambios en Monday.com
-- ✅ **Notificaciones Push**: Webhooks de Google Calendar para sincronización inversa
-- ✅ **Gestión Multi-Filmmaker**: Soporte para múltiples operarios por evento
-- ✅ **Limpieza Automática**: Eliminación de copias obsoletas
-- ✅ **Eventos Sin Asignar**: Gestión de eventos sin operario específico
-- ✅ **API Handler Avanzado**: MondayAPIHandler con manejo robusto de errores y reintentos
-- ✅ **Validación Inteligente**: Función `estan_sincronizados()` para comparación robusta de fechas/horas
-- ✅ **Suite de Pruebas Completa**: Validación automática de todos los flujos de sincronización
-- ✅ **Búsqueda Optimizada**: Sistema de búsqueda súper rápida (100x más rápida que antes)
-- ✅ **Sistema UUID**: Identificadores únicos para prevenir bucles y duplicados
-- ✅ **Cooldown Inteligente**: Sistema de enfriamiento que evita sincronizaciones innecesarias
+**Este sistema ha sido convertido de bidireccional a unidireccional para mayor estabilidad:**
 
-## 🚨 Problemas Conocidos
+### ✅ Ventajas del Sistema Unidireccional
+- **Elimina bucles infinitos**: No más problemas de sincronización circular
+- **Elimina problemas SSL**: No necesita webhooks de Google Calendar
+- **Simplicidad**: Flujo unidireccional claro Monday → Google
+- **Confiabilidad**: Monday.com como fuente única de verdad
+- **Mantenimiento**: Menos código, menos puntos de fallo
 
-### ⚠️ Sincronización Perdida en Múltiples Cambios Rápidos
-**Descripción**: Cuando se mueve un evento varias veces seguidas en poco tiempo, la sincronización se pierde en la segunda iteración.
-
-**Causa**: El sistema de cooldown y UUID puede estar siendo demasiado agresivo al detectar cambios duplicados.
-
-**Estado**: Pendiente de revisión y optimización.
-
-### ⚠️ Calendario "Sin Asignar" No Utilizado
-**Descripción**: Cuando no hay ningún usuario asignado, el sistema utiliza el calendario MASTER, pero debería utilizar también el calendario personal "Sin Asignar Stupendastic" que tiene esa utilidad específica.
-
-**Estado**: Pendiente de implementación.
+### ⚠️ Cambios Realizados
+- ❌ **Webhooks Google → Monday**: Completamente eliminados
+- ❌ **Sync tokens**: Sistema eliminado
+- ❌ **Sincronización inversa**: Deshabilitada
+- ✅ **Monitoreo de cambios**: Sistema pasivo implementado
+- ✅ **Monday → Google**: Funcionamiento optimizado
 
 ## 🏗️ Arquitectura del Sistema
 

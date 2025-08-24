@@ -14,29 +14,29 @@ def update_file_paths(file_path):
         
         original_content = content
         
-        # Actualizar referencias de config/channels/google_channel_map.json
-        content = content.replace('"config/channels/config/channels/google_channel_map.json"', '"config/channels/config/channels/google_channel_map.json"')
-        content = content.replace("'config/channels/config/channels/google_channel_map.json'", "'config/channels/config/channels/google_channel_map.json'")
-        content = content.replace('config/channels/config/channels/google_channel_map.json', 'config/channels/config/channels/google_channel_map.json')
+        # Actualizar referencias de google_channel_map.json
+        content = content.replace('"google_channel_map.json"', '"config/channels/google_channel_map.json"')
+        content = content.replace("'google_channel_map.json'", "'config/channels/google_channel_map.json'")
+        content = content.replace('google_channel_map.json', 'config/channels/google_channel_map.json')
         
         # Actualizar referencias de google_channel_info*.json
-        content = content.replace('"config/channels/google_channel_info', '"config/channels/google_channel_info')
-        content = content.replace("'config/channels/google_channel_info", "'config/channels/google_channel_info")
+        content = content.replace('"google_channel_info', '"config/channels/google_channel_info')
+        content = content.replace("'google_channel_info", "'config/channels/google_channel_info")
         
-        # Actualizar referencias de config/sync_tokens.json
-        content = content.replace('"config/config/sync_tokens.json"', '"config/config/sync_tokens.json"')
-        content = content.replace("'config/config/sync_tokens.json'", "'config/config/sync_tokens.json'")
-        content = content.replace('config/config/sync_tokens.json', 'config/config/sync_tokens.json')
+        # Actualizar referencias de sync_tokens.json
+        content = content.replace('"sync_tokens.json"', '"config/sync_tokens.json"')
+        content = content.replace("'sync_tokens.json'", "'config/sync_tokens.json'")
+        content = content.replace('sync_tokens.json', 'config/sync_tokens.json')
         
-        # Actualizar referencias de config/token.json
-        content = content.replace('"config/config/token.json"', '"config/config/token.json"')
-        content = content.replace("'config/config/token.json'", "'config/config/token.json'")
-        content = content.replace('config/config/token.json', 'config/config/token.json')
+        # Actualizar referencias de token.json
+        content = content.replace('"token.json"', '"config/token.json"')
+        content = content.replace("'token.json'", "'config/token.json'")
+        content = content.replace('token.json', 'config/token.json')
         
-        # Actualizar referencias de config/webhooks/webhooks_personales_info.json
-        content = content.replace('"config/webhooks/config/webhooks/webhooks_personales_info.json"', '"config/webhooks/config/webhooks/webhooks_personales_info.json"')
-        content = content.replace("'config/webhooks/config/webhooks/webhooks_personales_info.json'", "'config/webhooks/config/webhooks/webhooks_personales_info.json'")
-        content = content.replace('config/webhooks/config/webhooks/webhooks_personales_info.json', 'config/webhooks/config/webhooks/webhooks_personales_info.json')
+        # Actualizar referencias de webhooks_personales_info.json
+        content = content.replace('"webhooks_personales_info.json"', '"config/webhooks/webhooks_personales_info.json"')
+        content = content.replace("'webhooks_personales_info.json'", "'config/webhooks/webhooks_personales_info.json'")
+        content = content.replace('webhooks_personales_info.json', 'config/webhooks/webhooks_personales_info.json')
         
         # Solo escribir si hubo cambios
         if content != original_content:

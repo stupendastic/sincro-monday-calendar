@@ -2,9 +2,9 @@
 """
 Script para configurar webhooks en todos los calendarios personales
 """
+import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-import os
 import json
 from dotenv import load_dotenv
 from google_calendar_service import get_calendar_service
@@ -14,7 +14,7 @@ import config
 load_dotenv()
 
 # URL de ngrok
-NGROK_URL = "https://2e6cc727ffae.ngrok-free.app"
+NGROK_URL = "https://1f6deb6593e0.ngrok-free.app"
 
 def configurar_webhook_calendario_personal(calendar_id, filmmaker_name):
     """

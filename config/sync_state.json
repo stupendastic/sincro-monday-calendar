@@ -1,0 +1,101 @@
+{
+  "item_12345_google_event_67890": {
+    "last_monday_update": 1755940491.444163,
+    "last_google_update": 1755940491.442116,
+    "monday_content_hash": "48d956a72152c7a2691a169e6c5dcc833e39a76613914d756cee940f3ec495fa",
+    "google_content_hash": "d24dfbb944562f7294e2b36b3e0ac1570afa4e231c1292eb7361fc298fc0e4a1",
+    "sync_version": 7,
+    "last_sync_direction": "monday_to_google",
+    "last_sync_timestamp": 1755940491.444223
+  },
+  "webhook_item_123_webhook_event_456": {
+    "last_monday_update": 1755940491.445929,
+    "last_google_update": 1755940491.446634,
+    "monday_content_hash": "632610a3667a3f423b16d6eb86b2a6d4bd3a2a5e5850232f362deb3b496a9ed3",
+    "google_content_hash": "1c62af5901be1f21657b89becf0f834fc6bbe2fcd45fa4260b733665548128a7",
+    "sync_version": 2,
+    "last_sync_direction": "google_to_monday",
+    "last_sync_timestamp": 1755940491.446687
+  },
+  "test_item_123_test_event_456": {
+    "last_monday_update": 1755940729.2653708,
+    "last_google_update": 0,
+    "monday_content_hash": "abc123def456",
+    "google_content_hash": "",
+    "sync_version": 2,
+    "last_sync_direction": "monday_to_google",
+    "last_sync_timestamp": 1755940729.2653928
+  },
+  "simple_item_123_simple_event_456": {
+    "last_monday_update": 1755940871.6163461,
+    "last_google_update": 0,
+    "monday_content_hash": "test_hash_123",
+    "google_content_hash": "",
+    "sync_version": 1,
+    "last_sync_direction": "monday_to_google",
+    "last_sync_timestamp": 1755940871.6163719
+  },
+  "9882299305_kqu8tv7mo0b0s1lsqmh4pqcs90": {
+    "last_monday_update": 1755973824.311848,
+    "last_google_update": 0,
+    "monday_content_hash": "99914b932bd37a50b983c5e7c90ae93b",
+    "google_content_hash": "99914b932bd37a50b983c5e7c90ae93b",
+    "sync_version": 2,
+    "last_sync_direction": "monday_to_google",
+    "last_sync_timestamp": 1755973824.312478
+  },
+  "9884289318_gsh1mh4r5f4saihgu18h2ovs84": {
+    "last_monday_update": 1755988608.664274,
+    "last_google_update": 0,
+    "monday_content_hash": "2cdc18ce2111e89796d1aada7dc15dfd",
+    "google_content_hash": "",
+    "sync_version": 1,
+    "last_sync_direction": "monday_to_google",
+    "last_sync_timestamp": 1755988608.6651788
+  },
+  "9884289318_": {
+    "last_monday_update": 1755988608.9672,
+    "last_google_update": 0,
+    "monday_content_hash": "99914b932bd37a50b983c5e7c90ae93b",
+    "google_content_hash": "99914b932bd37a50b983c5e7c90ae93b",
+    "sync_version": 1,
+    "last_sync_direction": "monday_to_google",
+    "last_sync_timestamp": 1755988608.9674811
+  },
+  "9884711797_gqfrke0v665374at7n14uhok9g": {
+    "last_monday_update": 1755988786.993567,
+    "last_google_update": 0,
+    "monday_content_hash": "b5e90ca531776775a1c81c743198eee7",
+    "google_content_hash": "",
+    "sync_version": 1,
+    "last_sync_direction": "monday_to_google",
+    "last_sync_timestamp": 1755988786.9937012
+  },
+  "9884711797_": {
+    "last_monday_update": 1755988787.2679648,
+    "last_google_update": 0,
+    "monday_content_hash": "99914b932bd37a50b983c5e7c90ae93b",
+    "google_content_hash": "99914b932bd37a50b983c5e7c90ae93b",
+    "sync_version": 1,
+    "last_sync_direction": "monday_to_google",
+    "last_sync_timestamp": 1755988787.2683442
+  },
+  "9870432878_4ovfhjaq6u00hp4pme6gc3m0ts": {
+    "last_monday_update": 1756038659.477699,
+    "last_google_update": 0,
+    "monday_content_hash": "f29750fe2a15e2769f1828a3431fe6bb",
+    "google_content_hash": "",
+    "sync_version": 11,
+    "last_sync_direction": "monday_to_google",
+    "last_sync_timestamp": 1756038659.4781928
+  },
+  "9884731878_dufshse4m9gouao5r19t89urqs": {
+    "last_monday_update": 1756040682.423559,
+    "last_google_update": 0,
+    "monday_content_hash": "a9f0fa00dc2ac68484cd2bc40d7a48c0",
+    "google_content_hash": "",
+    "sync_version": 9,
+    "last_sync_direction": "monday_to_google",
+    "last_sync_timestamp": 1756040682.424
+  }
+}
